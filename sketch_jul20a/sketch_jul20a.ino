@@ -2,22 +2,21 @@
 // Polls the reader over SPI and reports insert/remove events as plain-text
 // lines over USB serial. See CLAUDE.md for the full serial protocol.
 
-#include <Wire.h>          // required by Adafruit_PN532 even though we talk SPI
+#include <Wire.h>
 #include <SPI.h>
 #include <Adafruit_PN532.h>
 
-#define PN532_SS 5  // chip-select pin for the PN532 over SPI
+#define PN532_SS 5
 
-const uint16_t POLL_TIMEOUT_MS = 50;   // how long each read attempt waits, in ms
-const uint8_t MISS_THRESHOLD = 4;      // consecutive empty polls before declaring "removed"
-const uint8_t REINIT_MAX_RETRIES = 2;  // reinit attempts after a removal before giving up
+const uint16_t POLL_TIMEOUT_MS = 50;
+const uint8_t MISS_THRESHOLD = 4;
+const uint8_t REINIT_MAX_RETRIES = 2;
 
 Adafruit_PN532 nfc(PN532_SS);
 
-// ponytail: Arduino String heap-churns on every poll (concatenation in uidToStr below) -
-// fine for now, switch currentUid/uidToStr to a fixed char[15] buffer if this ever runs multi-day unattended.
-String currentUid = "";  // UID of the tag currently on the reader, empty if none
-uint8_t missCount = 0;    // consecutive empty polls since the tag was last seen
+// ponytail: Arduino String heap-churns every poll, switch to a fixed char[15] buffer if this runs multi-day unattended.
+String currentUid = "";
+uint8_t missCount = 0;
 
 // Converts raw UID bytes into an uppercase hex string, e.g. {0x04, 0xA3} -> "04A3".
 String uidToStr(uint8_t *uid, uint8_t len) {
@@ -55,7 +54,8 @@ void setup() {
 }
 
 // Polls for a tag every cycle: reports inserts immediately, and debounces
-// removals over MISS_THRESHOLD misses before reporting and reinitializing.
+// removals over MISS_THRESHOLD misses before reporting and reinitializing
+// the reader (some PN532 clones stop responding after a read cycle).
 void loop() {
   uint8_t uid[7];
   uint8_t uidLength;
@@ -79,9 +79,6 @@ void loop() {
     currentUid = "";
     missCount = 0;
 
-    // Some PN532 clones stop responding after a read cycle finishes; reinit
-    // here so the firmware self-heals. Unlike setup(), retry a few times
-    // before giving up, since halting mid-session strands whoever's using it.
     for (uint8_t i = 0; i < REINIT_MAX_RETRIES; i++) {
       if (initReader()) break;
 
