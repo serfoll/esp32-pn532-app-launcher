@@ -25,3 +25,10 @@ Everything lives in one file and runs as a single polling loop — there's no as
 ## Project context
 
 This codebase doubles as a teaching workspace: the user is an experienced JS/Python developer who is new to embedded C/Arduino, and the existing code is deliberately over-commented to explain basic concepts (fixed-width integer types, pointers/`&`, `.ino` structure, etc.) inline. When adding new code or explaining this one, keep that same explain-as-you-go density rather than assuming embedded/C familiarity, and when teaching from this file, walk through it in the order things appear (top to bottom) rather than jumping to what seems like the most important concept first.
+
+## Workflow rules
+
+- **Commit/push security check**: before any `git commit` or `git push`, scan the staged content for secrets, credentials, API keys, tokens, sensitive data, or malicious code. If anything suspicious is found, stop and alert the user before proceeding.
+- **End-of-phase review**: at the end of each phase of work, run both `/agent-skills:code-review-and-quality` and `/mattpocock-skills:code-review`.
+- **End-of-plan checkpoint**: every plan must end with an explicit manual checkpoint where work pauses for user review before the plan is considered complete.
+- **Humanize user-facing copy**: run `/humanizer` on any user-facing copy (UI text, error messages, docs, README content, etc.) before delivering it as final.
