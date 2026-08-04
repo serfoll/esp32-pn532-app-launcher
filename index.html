@@ -44,6 +44,31 @@
 
     <pre id="output-log" class="output-log" hidden></pre>
 
+    <div id="game-context-menu" class="context-menu" hidden>
+      <button id="context-menu-edit" type="button">Edit</button>
+    </div>
+
+    <dialog id="edit-game-dialog">
+      <form method="dialog">
+        <h2>Edit game</h2>
+        <label>
+          Name
+          <input id="edit-game-name" required />
+        </label>
+        <div class="edit-game-actions">
+          <button id="edit-game-save-name" type="button">Save name</button>
+          <button id="edit-game-change-art" type="button">Change art...</button>
+        </div>
+
+        <h3>Tags bound to this game</h3>
+        <div id="edit-game-tags-list"></div>
+
+        <menu>
+          <button type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="scan-review-dialog">
       <form method="dialog">
         <h2>Confirm detected games</h2>

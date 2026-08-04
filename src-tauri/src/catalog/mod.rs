@@ -26,6 +26,11 @@ pub struct Game {
     pub exe_path: String,
     pub artwork_path: Option<String>,
     pub available: bool,
+    // User-uploaded art should survive "Refresh artwork" instead of being
+    // silently overwritten by the next auto-resolved (SteamGridDB/exe-icon)
+    // result. #[serde(default)] keeps older catalog.json files loadable.
+    #[serde(default)]
+    pub has_custom_artwork: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -110,6 +115,7 @@ mod tests {
             exe_path: exe_path.into(),
             artwork_path: None,
             available: true,
+            has_custom_artwork: false,
         }
     }
 
@@ -163,6 +169,21 @@ mod tests {
         fs::remove_file(&path).ok();
 
         assert!(!loaded.settings.show_output_log);
+    }
+
+    #[test]
+    fn loads_pre_has_custom_artwork_catalog_with_field_defaulted_false() {
+        let path = temp_path("legacy_game_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false},"games":[{"id":"g1","name":"Some Game","folderPath":"C:\\Games\\SomeGame","exePath":"C:\\Games\\SomeGame\\Game.exe","artworkPath":null,"available":true}],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before hasCustomArtwork existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert!(!loaded.games[0].has_custom_artwork);
     }
 
     #[test]

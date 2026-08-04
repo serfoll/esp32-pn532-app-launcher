@@ -11,6 +11,7 @@ export interface Game {
   exePath: string;
   artworkPath: string | null;
   available: boolean;
+  hasCustomArtwork: boolean;
 }
 
 export interface Binding {

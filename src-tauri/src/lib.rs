@@ -30,6 +30,8 @@ pub fn run() {
             commands::remove_root_folder,
             commands::confirm_games,
             commands::refresh_all_artwork,
+            commands::rename_game,
+            commands::set_custom_artwork,
             commands::bind_tag,
             commands::unbind_tag,
             commands::update_settings,

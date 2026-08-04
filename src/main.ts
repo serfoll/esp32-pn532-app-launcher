@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { Catalog, ScanCandidate } from "./types";
 import { renderGallery } from "./gallery/gallery";
+import { renderGameTagsList } from "./gallery/editGame";
 import { renderSettings } from "./settings/settings";
 import {
   renderScanReview,
@@ -38,6 +40,17 @@ const simulateForm = document.querySelector<HTMLFormElement>("#simulate-tag-form
 const simulateInput = document.querySelector<HTMLInputElement>("#simulate-tag-input")!;
 const alertBanner = document.querySelector<HTMLElement>("#alert-banner")!;
 const readerStatusEl = document.querySelector<HTMLElement>("#reader-status")!;
+
+const contextMenuEl = document.querySelector<HTMLElement>("#game-context-menu")!;
+const contextMenuEditBtn = document.querySelector<HTMLButtonElement>("#context-menu-edit")!;
+let contextMenuGameId = "";
+
+const editGameDialog = document.querySelector<HTMLDialogElement>("#edit-game-dialog")!;
+const editGameNameInput = document.querySelector<HTMLInputElement>("#edit-game-name")!;
+const editGameSaveNameBtn = document.querySelector<HTMLButtonElement>("#edit-game-save-name")!;
+const editGameChangeArtBtn = document.querySelector<HTMLButtonElement>("#edit-game-change-art")!;
+const editGameTagsListEl = document.querySelector<HTMLElement>("#edit-game-tags-list")!;
+let editGameId = "";
 
 const READER_STATUS_LABEL: Record<string, string> = {
   disconnected: "Reader: disconnected",
@@ -77,7 +90,7 @@ function showView(name: "gallery" | "settings"): void {
 }
 
 function refresh(): void {
-  renderGallery(galleryEl, catalog.games);
+  renderGallery(galleryEl, catalog.games, { onContextMenu: showContextMenu });
   renderSettings(settingsEl, catalog.settings, {
     onAddFolder: handleAddFolder,
     onRemoveFolder: handleRemoveFolder,
@@ -159,6 +172,67 @@ function openBindDialog(tagUid: string): void {
   bindTagLabel.textContent = tagUid;
   renderBindDialog(bindSelect, catalog.games);
   bindDialog.showModal();
+}
+
+function showContextMenu(event: MouseEvent, gameId: string): void {
+  contextMenuGameId = gameId;
+  contextMenuEl.style.left = `${event.clientX}px`;
+  contextMenuEl.style.top = `${event.clientY}px`;
+  contextMenuEl.hidden = false;
+}
+
+function hideContextMenu(): void {
+  contextMenuEl.hidden = true;
+}
+
+function refreshEditGameTagsList(): void {
+  renderGameTagsList(editGameTagsListEl, editGameId, catalog.bindings, handleUnbindFromEditDialog);
+}
+
+function openEditDialog(gameId: string): void {
+  const game = catalog.games.find((g) => g.id === gameId);
+  if (!game) return;
+  editGameId = gameId;
+  editGameNameInput.value = game.name;
+  refreshEditGameTagsList();
+  editGameDialog.showModal();
+}
+
+async function handleSaveGameName(): Promise<void> {
+  const name = editGameNameInput.value.trim();
+  if (!name) return;
+  const result = await invokeOrAlert<Catalog>("rename_game", { gameId: editGameId, name });
+  if (!result) return;
+  catalog = result;
+  refresh();
+  showAlert(`Renamed to "${name}".`);
+  log(`Renamed game ${editGameId} -> "${name}"`);
+}
+
+async function handleChangeGameArt(): Promise<void> {
+  const selected = await open({
+    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "webp", "ico"] }],
+  });
+  if (typeof selected !== "string") return;
+
+  const result = await invokeOrAlert<Catalog>("set_custom_artwork", {
+    gameId: editGameId,
+    sourcePath: selected,
+  });
+  if (!result) return;
+  catalog = result;
+  refresh();
+  const game = catalog.games.find((g) => g.id === editGameId);
+  log(`Set custom artwork for "${game?.name ?? editGameId}"`);
+}
+
+async function handleUnbindFromEditDialog(tagUid: string): Promise<void> {
+  const result = await invokeOrAlert<Catalog>("unbind_tag", { tagUid });
+  if (!result) return;
+  catalog = result;
+  refresh();
+  refreshEditGameTagsList();
+  log(`Unbound tag ${tagUid}`);
 }
 
 // A tag held too close to the reader can make it flap inserted/removed
@@ -258,6 +332,19 @@ simulateForm.addEventListener("submit", (e) => {
     simulateInput.value = "";
   }
 });
+
+contextMenuEditBtn.addEventListener("click", () => {
+  hideContextMenu();
+  openEditDialog(contextMenuGameId);
+});
+document.addEventListener("click", (e) => {
+  if (!contextMenuEl.hidden && !contextMenuEl.contains(e.target as Node)) {
+    hideContextMenu();
+  }
+});
+
+editGameSaveNameBtn.addEventListener("click", handleSaveGameName);
+editGameChangeArtBtn.addEventListener("click", handleChangeGameArt);
 
 navGallery.addEventListener("click", () => showView("gallery"));
 navSettings.addEventListener("click", () => showView("settings"));

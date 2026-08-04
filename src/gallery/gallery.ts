@@ -1,7 +1,11 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Game } from "../types";
 
-export function renderGallery(container: HTMLElement, games: Game[]): void {
+export interface GalleryHandlers {
+  onContextMenu: (event: MouseEvent, gameId: string) => void;
+}
+
+export function renderGallery(container: HTMLElement, games: Game[], handlers: GalleryHandlers): void {
   container.innerHTML = "";
 
   if (games.length === 0) {
@@ -15,6 +19,10 @@ export function renderGallery(container: HTMLElement, games: Game[]): void {
   for (const game of games) {
     const card = document.createElement("div");
     card.className = "game-card" + (game.available ? "" : " unavailable");
+    card.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      handlers.onContextMenu(e, game.id);
+    });
 
     const img = document.createElement("img");
     img.className = "game-art";

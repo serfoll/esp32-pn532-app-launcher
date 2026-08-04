@@ -163,6 +163,7 @@ pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalo
             folder_path: g.folder_path,
             exe_path: g.exe_path,
             artwork_path,
+            has_custom_artwork: false,
         });
     }
 
@@ -174,6 +175,8 @@ pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalo
 /// existing file at the same artwork path. For games added before
 /// SteamGridDB was wired in (or before a key was configured), this is the
 /// only way to upgrade their art without removing and re-adding them.
+/// Skips games with a user-uploaded custom art override — refreshing must
+/// never silently replace something the user picked deliberately.
 #[tauri::command]
 pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
@@ -183,6 +186,9 @@ pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
         .filter(|key| scan::steamgriddb_reachable(key));
 
     for game in &mut catalog.games {
+        if game.has_custom_artwork {
+            continue;
+        }
         let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&game.id)));
         if let Some(path) = resolve_game_artwork(
             &game.name,
@@ -195,6 +201,49 @@ pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
         }
     }
 
+    save_catalog(&app, &catalog)?;
+    Ok(catalog)
+}
+
+/// Renames a game. Identity (`id`, used by bindings) is the folder path,
+/// not the name, so renaming never touches existing tag bindings.
+#[tauri::command]
+pub fn rename_game(app: AppHandle, game_id: String, name: String) -> Result<Catalog, String> {
+    let mut catalog = load_catalog(&app)?;
+    let game = catalog
+        .games
+        .iter_mut()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("no game with id '{game_id}'"))?;
+    game.name = name;
+    save_catalog(&app, &catalog)?;
+    Ok(catalog)
+}
+
+/// Copies a user-picked image to the game's artwork slot and marks it as a
+/// custom override so `refresh_all_artwork` never overwrites it again.
+#[tauri::command]
+pub fn set_custom_artwork(
+    app: AppHandle,
+    game_id: String,
+    source_path: String,
+) -> Result<Catalog, String> {
+    let mut catalog = load_catalog(&app)?;
+    let artwork_dir = catalog_path(&app)?.parent().unwrap().join("artwork");
+    std::fs::create_dir_all(&artwork_dir).map_err(|e| e.to_string())?;
+
+    let game = catalog
+        .games
+        .iter_mut()
+        .find(|g| g.id == game_id)
+        .ok_or_else(|| format!("no game with id '{game_id}'"))?;
+
+    let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&game.id)));
+    let image = image::open(&source_path).map_err(|e| e.to_string())?;
+    image.save(&dest).map_err(|e| e.to_string())?;
+
+    game.artwork_path = Some(dest.to_string_lossy().to_string());
+    game.has_custom_artwork = true;
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
