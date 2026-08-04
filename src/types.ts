@@ -1,6 +1,7 @@
 export interface Settings {
   rootFolders: string[];
   confirmBeforeLaunch: boolean;
+  showOutputLog: boolean;
 }
 
 export interface Game {

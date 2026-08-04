@@ -45,6 +45,35 @@ pub fn find_steam_app_id(folder_path: &Path) -> Option<String> {
     None
 }
 
+/// Checks whether any currently-running process's executable lives
+/// somewhere under `folder_path`, so a cart pulled and reinserted while its
+/// game is still open doesn't spawn a second instance.
+///
+/// Deliberately checks the whole install folder rather than the one exe we
+/// recorded: some launchers (EA App, confirmed live) hand off from a thin
+/// stub exe to a *different* exe in the same folder, then exit the stub by
+/// design. An exact-exe check would see the stub gone the moment it hands
+/// off and wrongly conclude "not running" while the real game keeps going
+/// right next to it.
+///
+/// Uses `Path::starts_with` (component-wise) rather than a raw string
+/// prefix, so a folder like "EA SPORTS FC 24" doesn't false-match a
+/// sibling "EA SPORTS FC 24 Beta". Compares case-insensitively: Windows
+/// paths are case-preserving but case-insensitive, and in practice
+/// `std::env::current_exe()` and sysinfo's reported process path can
+/// differ only in case for the exact same file (observed directly: one
+/// returns `_Dev`, the other `_DEV` for this project's own path).
+pub fn is_game_running(folder_path: &str) -> bool {
+    let target = Path::new(&folder_path.to_lowercase()).to_path_buf();
+    let mut system = sysinfo::System::new_all();
+    system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
+    system.processes().values().any(|p| {
+        p.exe().is_some_and(|exe| {
+            Path::new(&exe.to_string_lossy().to_lowercase()).starts_with(&target)
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +131,32 @@ mod tests {
         fs::remove_dir_all(&root).ok();
 
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn detects_the_current_process_by_its_folder_not_its_exact_exe_name() {
+        // Mirrors the EA App case: checking the *folder* still finds the
+        // running process even without matching its exact exe filename --
+        // the whole point, since a stub launcher's recorded exe often isn't
+        // the one that ends up actually running.
+        let current_exe = std::env::current_exe().unwrap();
+        let folder = current_exe.parent().unwrap().to_str().unwrap();
+        assert!(is_game_running(folder));
+    }
+
+    #[test]
+    fn does_not_false_match_a_truncated_folder_that_only_shares_a_string_prefix() {
+        // A naive string-prefix check would wrongly match a chopped-up
+        // path like ".../exam" against the real ".../examples/..." --
+        // component-wise Path::starts_with must not.
+        let current_exe = std::env::current_exe().unwrap();
+        let folder = current_exe.parent().unwrap().to_str().unwrap().to_string();
+        let truncated = &folder[..folder.len() - 3];
+        assert!(!is_game_running(truncated));
+    }
+
+    #[test]
+    fn returns_false_for_a_folder_nothing_is_running_from() {
+        assert!(!is_game_running(r"C:\definitely\not\a\real\running\folder"));
     }
 }

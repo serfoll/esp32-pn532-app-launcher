@@ -143,6 +143,31 @@ button:active {
   padding: 0;
 }
 
+.output-log {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  margin: 0;
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 0.85em;
+  background-color: #f6f6f6;
+  border-top: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.15);
+  padding: 0.75em 1em;
+  max-height: 30vh;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .output-log {
+    background-color: #2f2f2f;
+    border-top-color: rgba(255, 255, 255, 0.15);
+  }
+}
+
 .add-folder-form,
 #simulate-tag-form {
   display: flex;

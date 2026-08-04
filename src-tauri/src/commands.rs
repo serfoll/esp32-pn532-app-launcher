@@ -225,10 +225,12 @@ pub fn update_settings(
     app: AppHandle,
     root_folders: Vec<String>,
     confirm_before_launch: bool,
+    show_output_log: bool,
 ) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
     catalog.settings.root_folders = root_folders;
     catalog.settings.confirm_before_launch = confirm_before_launch;
+    catalog.settings.show_output_log = show_output_log;
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
@@ -249,19 +251,34 @@ pub fn get_reader_state(state: State<'_, Mutex<ReaderState>>) -> String {
 /// outside their launcher instead of showing an error, and going through
 /// the launcher sidesteps that entirely.
 ///
-/// For the direct-spawn fallback: `spawn()` succeeding only means the OS
-/// started the process, not that it stayed running. A brief post-launch
-/// check catches an immediate silent exit instead of reporting success for
-/// a process that's already gone. There's no equivalent check for the
-/// launcher-protocol path — `open::that` just asks the OS to hand the URI
-/// to Steam and returns, with no process handle to poll.
+/// Returns `Ok(false)` instead of launching if something from the game's
+/// install folder is already running — a cart pulled and reinserted while
+/// its game is still open would otherwise spawn a second instance once the
+/// tag-event cooldown lapses. Checked by folder rather than the recorded
+/// exe specifically, since a launcher stub (EA App, confirmed live) can
+/// hand off to a *different* exe in the same folder and exit itself —
+/// checking the exact exe would see it gone and wrongly launch again.
+///
+/// For the direct-spawn fallback: this only reports whether the OS
+/// accepted the launch, not whether the game window ever showed up. An
+/// earlier version tried to catch an immediate exit as a failure signal,
+/// but plenty of legitimate launchers (EA App among them) use a thin stub
+/// exe that hands off to the real game and exits *by design* — that's
+/// indistinguishable from a genuine crash from the outside, so a "did it
+/// stay alive" check produces false failures on working launches. Better
+/// to under-report than to tell the user a launch failed when it didn't.
 #[tauri::command]
-pub fn launch_game(exe_path: String) -> Result<(), String> {
+pub fn launch_game(exe_path: String, folder_path: String) -> Result<bool, String> {
+    if crate::launch::is_game_running(&folder_path) {
+        return Ok(false);
+    }
+
     let path = std::path::Path::new(&exe_path);
 
     if let Some(folder) = path.parent() {
         if let Some(app_id) = crate::launch::find_steam_app_id(folder) {
-            return open::that(format!("steam://rungameid/{app_id}")).map_err(|e| e.to_string());
+            open::that(format!("steam://rungameid/{app_id}")).map_err(|e| e.to_string())?;
+            return Ok(true);
         }
     }
 
@@ -269,13 +286,6 @@ pub fn launch_game(exe_path: String) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         cmd.current_dir(dir);
     }
-    let mut child = cmd.spawn().map_err(|e| e.to_string())?;
-
-    std::thread::sleep(std::time::Duration::from_millis(700));
-    match child.try_wait() {
-        Ok(Some(status)) => Err(format!(
-            "the process exited immediately ({status}) instead of staying open — this could mean it needs its own launcher, or there's an unrelated problem with the game itself"
-        )),
-        _ => Ok(()),
-    }
+    cmd.spawn().map_err(|e| e.to_string())?;
+    Ok(true)
 }

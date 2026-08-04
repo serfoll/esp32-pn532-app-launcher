@@ -11,6 +11,10 @@ use std::path::Path;
 pub struct Settings {
     pub root_folders: Vec<String>,
     pub confirm_before_launch: bool,
+    // #[serde(default)] so catalog.json files written before this field
+    // existed still load (missing -> false) instead of failing to parse.
+    #[serde(default)]
+    pub show_output_log: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -47,6 +51,7 @@ impl Default for Catalog {
             settings: Settings {
                 root_folders: Vec::new(),
                 confirm_before_launch: false,
+                show_output_log: false,
             },
             games: Vec::new(),
             bindings: Vec::new(),
@@ -143,6 +148,21 @@ mod tests {
 
         let loaded = load(&path).expect("missing file should load as default, not error");
         assert_eq!(loaded, Catalog::default());
+    }
+
+    #[test]
+    fn loads_pre_show_output_log_catalog_with_field_defaulted_false() {
+        let path = temp_path("legacy_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before showOutputLog existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert!(!loaded.settings.show_output_log);
     }
 
     #[test]

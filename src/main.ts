@@ -9,16 +9,19 @@ import {
   renderBindDialog,
   renderBindingsList,
 } from "./binding/binding";
+import { appendLog } from "./log/log";
 
 let catalog: Catalog;
 
 const galleryEl = document.querySelector<HTMLElement>("#gallery-grid")!;
 const settingsEl = document.querySelector<HTMLElement>("#settings-content")!;
 const bindingsListEl = document.querySelector<HTMLElement>("#bindings-list")!;
+const outputLogEl = document.querySelector<HTMLElement>("#output-log")!;
 const viewGallery = document.querySelector<HTMLElement>("#view-gallery")!;
 const viewSettings = document.querySelector<HTMLElement>("#view-settings")!;
 const navGallery = document.querySelector<HTMLButtonElement>("#nav-gallery")!;
 const navSettings = document.querySelector<HTMLButtonElement>("#nav-settings")!;
+const toggleLogBtn = document.querySelector<HTMLButtonElement>("#toggle-log")!;
 
 const scanReviewDialog = document.querySelector<HTMLDialogElement>("#scan-review-dialog")!;
 const scanReviewList = document.querySelector<HTMLElement>("#scan-review-list")!;
@@ -52,6 +55,10 @@ function showAlert(message: string): void {
   alertBanner.hidden = false;
 }
 
+function log(message: string): void {
+  appendLog(outputLogEl, message);
+}
+
 /** Every Tauri command can reject (bad path, disk full, permission denied)
  * — routing all of them through here means a backend error always reaches
  * the user instead of dying as a silent unhandled rejection. */
@@ -78,6 +85,7 @@ function refresh(): void {
     onRefreshArtwork: handleRefreshArtwork,
   });
   renderBindingsList(bindingsListEl, catalog.bindings, catalog.games, handleUnbindTag);
+  outputLogEl.hidden = !catalog.settings.showOutputLog;
 }
 
 async function handleUnbindTag(tagUid: string): Promise<void> {
@@ -85,6 +93,7 @@ async function handleUnbindTag(tagUid: string): Promise<void> {
   if (!result) return;
   catalog = result;
   refresh();
+  log(`Unbound tag ${tagUid}`);
 }
 
 async function loadCatalog(): Promise<void> {
@@ -127,6 +136,18 @@ async function handleToggleConfirmBeforeLaunch(value: boolean): Promise<void> {
   const result = await invokeOrAlert<Catalog>("update_settings", {
     rootFolders: catalog.settings.rootFolders,
     confirmBeforeLaunch: value,
+    showOutputLog: catalog.settings.showOutputLog,
+  });
+  if (!result) return;
+  catalog = result;
+  refresh();
+}
+
+async function handleToggleShowOutputLog(value: boolean): Promise<void> {
+  const result = await invokeOrAlert<Catalog>("update_settings", {
+    rootFolders: catalog.settings.rootFolders,
+    confirmBeforeLaunch: catalog.settings.confirmBeforeLaunch,
+    showOutputLog: value,
   });
   if (!result) return;
   catalog = result;
@@ -163,8 +184,11 @@ async function handleTagEvent(tagUid: string): Promise<void> {
   }
   lastHandledTagEventAt.set(tagUid, now);
 
+  log(`Tag inserted: ${tagUid}`);
+
   const binding = catalog.bindings.find((b) => b.tagUid === tagUid);
   if (!binding) {
+    log(`Tag ${tagUid} is not bound to a game — opening bind dialog`);
     openBindDialog(tagUid);
     return;
   }
@@ -172,22 +196,35 @@ async function handleTagEvent(tagUid: string): Promise<void> {
   const game = catalog.games.find((g) => g.id === binding.gameId);
   if (!game) {
     showAlert(`Tag ${tagUid} is bound to a game that's no longer in the catalog.`);
+    log(`Tag ${tagUid} is bound to a game that's no longer in the catalog`);
     return;
   }
   if (!game.available) {
     showAlert(`"${game.name}" is bound to this tag but isn't installed/found right now.`);
+    log(`"${game.name}" is unavailable, not launching`);
     return;
   }
 
   if (catalog.settings.confirmBeforeLaunch && !window.confirm(`Launch "${game.name}"?`)) {
+    log(`Launch of "${game.name}" cancelled at confirm prompt`);
     return;
   }
 
   try {
-    await invoke("launch_game", { exePath: game.exePath });
-    showAlert(`Launched "${game.name}".`);
+    const launched = await invoke<boolean>("launch_game", {
+      exePath: game.exePath,
+      folderPath: game.folderPath,
+    });
+    if (launched) {
+      showAlert(`Launched "${game.name}".`);
+      log(`Launched "${game.name}"`);
+    } else {
+      showAlert(`"${game.name}" is already running.`);
+      log(`"${game.name}" is already running, not relaunching`);
+    }
   } catch (e) {
     showAlert(`Couldn't launch "${game.name}": ${e}`);
+    log(`Failed to launch "${game.name}": ${e}`);
   }
 }
 
@@ -210,6 +247,7 @@ bindConfirmBtn.addEventListener("click", async () => {
   bindDialog.close();
   refresh();
   showAlert(`Bound tag ${bindTagUid}.`);
+  log(`Bound tag ${bindTagUid} -> ${bindSelect.selectedOptions[0]?.textContent ?? gameId}`);
 });
 
 simulateForm.addEventListener("submit", (e) => {
@@ -223,11 +261,18 @@ simulateForm.addEventListener("submit", (e) => {
 
 navGallery.addEventListener("click", () => showView("gallery"));
 navSettings.addEventListener("click", () => showView("settings"));
+toggleLogBtn.addEventListener("click", () => handleToggleShowOutputLog(!catalog.settings.showOutputLog));
 
-listen<string>("reader-state", (event) => updateReaderStatus(event.payload));
+listen<string>("reader-state", (event) => {
+  updateReaderStatus(event.payload);
+  log(`Reader state: ${event.payload}`);
+});
 listen<string>("tag-inserted", (event) => handleTagEvent(event.payload));
-listen<string>("reader-error", (event) => showAlert(`Reader: ${event.payload}`));
-// tag-removed has no UI reaction yet — nothing in the spec asks for one.
+listen<string>("tag-removed", (event) => log(`Tag removed: ${event.payload}`));
+listen<string>("reader-error", (event) => {
+  showAlert(`Reader: ${event.payload}`);
+  log(`Reader error: ${event.payload}`);
+});
 
 window.addEventListener("DOMContentLoaded", () => {
   showView("gallery");
