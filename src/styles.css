@@ -1,0 +1,220 @@
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+
+  color: #0f0f0f;
+  background-color: #f6f6f6;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75em 1.5em;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.app-header h1 {
+  font-size: 1.25em;
+  margin: 0;
+}
+
+.reader-status {
+  font-size: 0.85em;
+  padding: 0.3em 0.7em;
+  border-radius: 999px;
+  margin-right: auto;
+  margin-left: 1em;
+}
+
+.reader-status--disconnected {
+  background-color: rgba(220, 53, 69, 0.15);
+  color: #dc3545;
+}
+
+.reader-status--connectedUnknownFirmware {
+  background-color: rgba(255, 193, 7, 0.2);
+  color: #a56d00;
+}
+
+.reader-status--connectedReady {
+  background-color: rgba(25, 135, 84, 0.15);
+  color: #198754;
+}
+
+main {
+  padding: 1.5em;
+}
+
+input,
+button,
+select {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  color: #0f0f0f;
+  background-color: #ffffff;
+  transition: border-color 0.25s;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  outline: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #396cd8;
+}
+button:active {
+  border-color: #396cd8;
+  background-color: #e8e8e8;
+}
+
+.alert-banner {
+  margin: 0 1.5em;
+  padding: 0.75em 1em;
+  border-radius: 8px;
+  background-color: #fff3cd;
+  color: #664d03;
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 1em;
+}
+
+.game-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 0.5em;
+}
+
+.game-card.unavailable {
+  opacity: 0.5;
+}
+
+.game-art {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+.empty-state {
+  color: #666;
+}
+
+.root-folder-list {
+  list-style: none;
+  padding: 0;
+}
+
+.root-folder-list li,
+.bindings-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.3em 0;
+}
+
+.bindings-list {
+  list-style: none;
+  padding: 0;
+}
+
+.add-folder-form,
+#simulate-tag-form {
+  display: flex;
+  gap: 0.5em;
+}
+
+.scan-review-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.4em 0;
+}
+
+.scan-review-name {
+  min-width: 10em;
+}
+
+.scan-review-exe {
+  flex: 1;
+}
+
+.dev-tools {
+  margin-top: 2em;
+  padding-top: 1em;
+  border-top: 1px dashed rgba(0, 0, 0, 0.2);
+}
+
+dialog {
+  border: none;
+  border-radius: 8px;
+  padding: 1.5em;
+  color: inherit;
+  background-color: #f6f6f6;
+  min-width: 320px;
+}
+
+dialog::backdrop {
+  background-color: rgba(0, 0, 0, 0.4);
+}
+
+dialog menu {
+  display: flex;
+  gap: 0.5em;
+  padding: 0;
+  margin: 1em 0 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f6f6f6;
+    background-color: #2f2f2f;
+  }
+
+  .app-header {
+    border-bottom-color: rgba(255, 255, 255, 0.15);
+  }
+
+  input,
+  button,
+  select {
+    color: #ffffff;
+    background-color: #0f0f0f98;
+  }
+  button:active {
+    background-color: #0f0f0f69;
+  }
+
+  .dev-tools {
+    border-top-color: rgba(255, 255, 255, 0.2);
+  }
+
+  dialog {
+    background-color: #2f2f2f;
+  }
+}

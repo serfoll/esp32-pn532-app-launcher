@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="/src/styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cart Reader</title>
+    <script type="module" src="/src/main.ts" defer></script>
+  </head>
+
+  <body>
+    <header class="app-header">
+      <h1>Cart Reader</h1>
+      <span id="reader-status" class="reader-status reader-status--disconnected">Reader: disconnected</span>
+      <nav>
+        <button id="nav-gallery">Gallery</button>
+        <button id="nav-settings">Settings</button>
+      </nav>
+    </header>
+
+    <p id="alert-banner" class="alert-banner" hidden></p>
+
+    <main id="view-gallery">
+      <div id="gallery-grid" class="gallery-grid"></div>
+    </main>
+
+    <main id="view-settings" hidden>
+      <div id="settings-content"></div>
+
+      <section>
+        <h2>Tag bindings</h2>
+        <div id="bindings-list"></div>
+      </section>
+
+      <section class="dev-tools">
+        <h2>Dev: simulate tag insert</h2>
+        <form id="simulate-tag-form">
+          <input id="simulate-tag-input" placeholder="Tag UID, e.g. 04A3B2C1" />
+          <button type="submit">Trigger insert</button>
+        </form>
+      </section>
+    </main>
+
+    <dialog id="scan-review-dialog">
+      <form method="dialog">
+        <h2>Confirm detected games</h2>
+        <div id="scan-review-list"></div>
+        <menu>
+          <button id="scan-review-confirm" type="button">Add confirmed games</button>
+          <button type="submit">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="bind-dialog">
+      <form method="dialog">
+        <h2>Bind tag <span id="bind-tag-uid"></span></h2>
+        <select id="bind-game-select"></select>
+        <menu>
+          <button id="bind-confirm" type="button">Bind</button>
+          <button type="submit">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+  </body>
+</html>

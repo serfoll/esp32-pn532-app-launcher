@@ -12,6 +12,11 @@ const uint16_t POLL_TIMEOUT_MS = 50;
 const uint8_t MISS_THRESHOLD = 4;
 const uint8_t REINIT_MAX_RETRIES = 2;
 
+// Identifies this firmware to the host app, which needs to tell "real reader,
+// wrong/no firmware" apart from "nothing plugged in" before it can trust any
+// other line on the wire.
+const char *FIRMWARE_ID = "RFIDCART_FW:v1";
+
 Adafruit_PN532 nfc(PN532_SS);
 
 // ponytail: Arduino String heap-churns every poll, switch to a fixed char[15] buffer if this runs multi-day unattended.
@@ -38,7 +43,20 @@ bool initReader() {
 
   nfc.SAMConfig();
   Serial.println("READY");
+  Serial.println(FIRMWARE_ID);
   return true;
+}
+
+// Answers the host's "ID?" handshake so it doesn't have to wait for the
+// unprompted READY/FIRMWARE_ID pair after a reinit to know what it's talking to.
+void handleHostCommand() {
+  if (!Serial.available()) return;
+
+  String cmd = Serial.readStringUntil('\n');
+  cmd.trim();
+  if (cmd == "ID?") {
+    Serial.println(FIRMWARE_ID);
+  }
 }
 
 // One-time boot init. Halts forever if the reader never responds, since that
@@ -57,6 +75,8 @@ void setup() {
 // removals over MISS_THRESHOLD misses before reporting and reinitializing
 // the reader (some PN532 clones stop responding after a read cycle).
 void loop() {
+  handleHostCommand();
+
   uint8_t uid[7];
   uint8_t uidLength;
 
