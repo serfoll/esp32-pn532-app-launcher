@@ -12,6 +12,13 @@ const uint16_t POLL_TIMEOUT_MS = 50;
 const uint8_t MISS_THRESHOLD = 4;
 const uint8_t REINIT_MAX_RETRIES = 2;
 
+// A tag held too close to the antenna over-couples it, causing reads to
+// intermittently fail even though the tag never moved -- MISS_THRESHOLD
+// then declares it removed, and the very next successful read re-declares
+// the *same* tag inserted. This grace period treats a same-tag reappearance
+// shortly after a removal as that noise, not a real re-insert.
+const uint16_t REINSERT_GRACE_MS = 1000;
+
 // Identifies this firmware to the host app, which needs to tell "real reader,
 // wrong/no firmware" apart from "nothing plugged in" before it can trust any
 // other line on the wire.
@@ -22,6 +29,8 @@ Adafruit_PN532 nfc(PN532_SS);
 // ponytail: Arduino String heap-churns every poll, switch to a fixed char[15] buffer if this runs multi-day unattended.
 String currentUid = "";
 uint8_t missCount = 0;
+String lastRemovedUid = "";
+unsigned long lastRemovedAtMs = 0;
 
 // Converts raw UID bytes into an uppercase hex string, e.g. {0x04, 0xA3} -> "04A3".
 String uidToStr(uint8_t *uid, uint8_t len) {
@@ -87,8 +96,11 @@ void loop() {
     String uidStr = uidToStr(uid, uidLength);
 
     if (uidStr != currentUid) {
+      bool isNoiseFromRecentRemoval = uidStr == lastRemovedUid && millis() - lastRemovedAtMs < REINSERT_GRACE_MS;
       currentUid = uidStr;
-      Serial.println("INSERTED:" + currentUid);
+      if (!isNoiseFromRecentRemoval) {
+        Serial.println("INSERTED:" + currentUid);
+      }
     }
   } else {
     missCount++;
@@ -96,6 +108,8 @@ void loop() {
 
   if (currentUid != "" && missCount >= MISS_THRESHOLD) {
     Serial.println("REMOVED:" + currentUid);
+    lastRemovedUid = currentUid;
+    lastRemovedAtMs = millis();
     currentUid = "";
     missCount = 0;
 

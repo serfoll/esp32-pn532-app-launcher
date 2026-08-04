@@ -140,6 +140,14 @@ function openBindDialog(tagUid: string): void {
   bindDialog.showModal();
 }
 
+// A tag held too close to the reader can make it flap inserted/removed
+// repeatedly even though it never moved (the firmware also guards against
+// this, but this is a second, independent line of defense so a repeat
+// insert of the same tag can never fire a fresh launch/dialog-open faster
+// than this).
+const RECENT_TAG_EVENT_COOLDOWN_MS = 3000;
+const lastHandledTagEventAt = new Map<string, number>();
+
 /** Looks up a tag UID against the catalog and reacts: alerts on an
  * unavailable game, opens the bind dialog for an unbound tag, or launches
  * the bound game (with a confirm prompt first if settings.confirmBeforeLaunch
@@ -147,6 +155,13 @@ function openBindDialog(tagUid: string): void {
  * simulate-insert form below. */
 async function handleTagEvent(tagUid: string): Promise<void> {
   if (!catalog) return; // a real insert can in principle race the initial catalog load
+
+  const now = Date.now();
+  const lastHandledAt = lastHandledTagEventAt.get(tagUid);
+  if (lastHandledAt !== undefined && now - lastHandledAt < RECENT_TAG_EVENT_COOLDOWN_MS) {
+    return;
+  }
+  lastHandledTagEventAt.set(tagUid, now);
 
   const binding = catalog.bindings.find((b) => b.tagUid === tagUid);
   if (!binding) {
