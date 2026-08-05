@@ -129,6 +129,32 @@ pub fn scan_root(root: &Path) -> Vec<ScanCandidate> {
     candidates
 }
 
+/// Scans every registered root folder for subfolders not already in
+/// `known_folder_paths` -- the "what's new" half of the gallery's Sync
+/// action. Unlike `scan_root`'s caller in the old "add one folder" flow,
+/// this doesn't drop candidates with no confidently-detected exe -- it
+/// leaves that call to whoever's adding the results to the catalog, since
+/// they're the one who knows whether "skipped, here's how many" needs
+/// reporting to the user. A root folder that's gone missing (drive
+/// unplugged, moved, deleted since it was registered) is skipped, rather
+/// than failing the whole sync.
+pub fn scan_new_games(root_folders: &[String], known_folder_paths: &[String]) -> Vec<ScanCandidate> {
+    let mut found = Vec::new();
+    for root_folder in root_folders {
+        let root = Path::new(root_folder);
+        if !root.is_dir() {
+            continue;
+        }
+        for candidate in scan_root(root) {
+            if known_folder_paths.iter().any(|p| p == &candidate.folder_path) {
+                continue;
+            }
+            found.push(candidate);
+        }
+    }
+    found
+}
+
 const FOLDER_ART_CANDIDATES: &[&str] = &[
     "folder.png",
     "folder.jpg",
@@ -301,6 +327,36 @@ mod tests {
     fn write_file(path: &Path, size: usize) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, vec![0u8; size]).unwrap();
+    }
+
+    #[test]
+    fn scan_new_games_excludes_known_folders_but_keeps_ambiguous_ones() {
+        let root = temp_root("sync");
+        write_file(&root.join("NewGame").join("NewGame.exe"), 10);
+        write_file(&root.join("AlreadyCataloged").join("AlreadyCataloged.exe"), 10);
+        fs::create_dir_all(root.join("NoExeFound")).unwrap();
+
+        let known = vec![root.join("AlreadyCataloged").to_string_lossy().to_string()];
+        let root_folders = vec![root.to_string_lossy().to_string()];
+
+        let mut found = scan_new_games(&root_folders, &known);
+        fs::remove_dir_all(&root).ok();
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(found.len(), 2, "AlreadyCataloged is excluded, but NewGame and the ambiguous folder both come back for the caller to report on");
+        assert_eq!(found[0].name, "NewGame");
+        assert!(found[0].exe_path.is_some());
+        assert_eq!(found[1].name, "NoExeFound");
+        assert!(found[1].exe_path.is_none());
+    }
+
+    #[test]
+    fn scan_new_games_skips_a_root_folder_that_no_longer_exists() {
+        let missing_root = vec!["C:\\Games\\NoLongerThere".to_string()];
+
+        let found = scan_new_games(&missing_root, &[]);
+
+        assert!(found.is_empty());
     }
 
     #[test]

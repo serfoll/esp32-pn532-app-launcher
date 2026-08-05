@@ -36,3 +36,9 @@ export interface ScanCandidate {
   name: string;
   exePath: string | null;
 }
+
+export interface SyncResult {
+  catalog: Catalog;
+  added: number;
+  skippedNames: string[];
+}

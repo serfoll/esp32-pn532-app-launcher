@@ -167,6 +167,12 @@ nav {
   border-bottom-color: #396cd8;
 }
 
+.sync-button {
+  padding: 0.3em 0.9em;
+  font-size: 0.9em;
+  align-self: center;
+}
+
 .reader-status {
   font-size: 0.85em;
   padding: 0.3em 0.7em;
@@ -301,6 +307,8 @@ button:active {
    interaction instead of getting replaced by the generic button's blue
    hover/gray active accents. */
 .game-art-button {
+  --card-glow: 33, 150, 243;
+
   position: relative;
   display: block;
   width: 100%;
@@ -315,15 +323,32 @@ button:active {
   border-radius: 1rem;
   corner-shape: squircle;
   background: none;
-  box-shadow: none;
+  /* Gives each card the look of a physical case sitting on a shelf: a
+     crisp blue rim, a soft blue glow around that, then a dark contact
+     shadow and a wider ambient one underneath. The rim sits just outside
+     the status border (border-color above) rather than replacing it, so
+     bound/unbound is still readable at a glance. --card-glow holds the one
+     rim/glow hue so the four shadow layers only vary alpha/blur, not color. */
+  box-shadow:
+    0 0 0 1px rgba(var(--card-glow), 0.55),
+    0 0 12px rgba(var(--card-glow), 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 8px 16px rgba(0, 0, 0, 0.45);
   cursor: pointer;
   overflow: hidden;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .game-art-button:hover,
 .game-art-button:active {
   border-color: var(--game-status-color);
   background: none;
+  box-shadow:
+    0 0 0 1px rgba(var(--card-glow), 0.7),
+    0 0 16px rgba(var(--card-glow), 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.35),
+    0 12px 24px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
 }
 
 .game-art-button--bound {
@@ -389,12 +414,24 @@ button:active {
   position: absolute;
   top: 0.5em;
   right: 0.5em;
-  width: 1.1em;
-  height: 1.1em;
-  padding: 0.3em;
-  border-radius: 50%;
-  background-color: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.3em 0.6em;
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.6);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: #ffffff;
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.game-store-badge-icon {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
 }
 
 .empty-state {
@@ -454,21 +491,6 @@ button:active {
 .simulate-tag-row {
   display: flex;
   gap: 0.5em;
-}
-
-.scan-review-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.4em 0;
-}
-
-.scan-review-name {
-  min-width: 10em;
-}
-
-.scan-review-exe {
-  flex: 1;
 }
 
 /* Dialogs default to centering across the whole viewport, which lets them

@@ -96,11 +96,20 @@ export function renderGallery(
     iconButton.appendChild(playIcon);
 
     if (showStoreBadges && game.store && STORE_ICONS[game.store]) {
-      const storeBadge = document.createElement("img");
+      const storeBadge = document.createElement("span");
       storeBadge.className = "game-store-badge";
-      storeBadge.src = STORE_ICONS[game.store];
-      storeBadge.alt = "";
       storeBadge.title = `Installed via ${STORE_NAMES[game.store]}`;
+
+      const storeIcon = document.createElement("img");
+      storeIcon.className = "game-store-badge-icon";
+      storeIcon.src = STORE_ICONS[game.store];
+      storeIcon.alt = "";
+      storeBadge.appendChild(storeIcon);
+
+      const storeLabel = document.createElement("span");
+      storeLabel.textContent = STORE_NAMES[game.store];
+      storeBadge.appendChild(storeLabel);
+
       iconButton.appendChild(storeBadge);
     }
 

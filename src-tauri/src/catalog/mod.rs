@@ -2,10 +2,11 @@
 // truth for what the gallery shows and what a tag insert launches.
 
 use crate::launch::Store;
+use crate::scan;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn default_true() -> bool {
     true
@@ -168,6 +169,79 @@ pub fn backfill_stores(catalog: &mut Catalog) {
     }
 }
 
+/// Games use their folder path as `id` — it's already unique per game, so a
+/// separate uuid dependency would just be more code for the same guarantee.
+pub fn sanitize_for_filename(id: &str) -> String {
+    id.chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect()
+}
+
+/// Resolves and writes artwork for one game: SteamGridDB first when a
+/// (reachability-checked) key is available, local folder art / exe icon
+/// otherwise or on any SteamGridDB failure. Shared by `add_confirmed_games`
+/// and `refresh_all_artwork` so the fallback chain only lives in one place.
+pub fn resolve_game_artwork(
+    name: &str,
+    folder_path: &str,
+    exe_path: &str,
+    dest: &Path,
+    steamgriddb_key: Option<&str>,
+) -> Option<PathBuf> {
+    steamgriddb_key
+        .and_then(|key| scan::fetch_steamgriddb_grid(name, key, dest))
+        .or_else(|| scan::resolve_artwork(Path::new(folder_path), Some(Path::new(exe_path)), dest))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmedGame {
+    pub folder_path: String,
+    pub name: String,
+    pub exe_path: String,
+}
+
+/// Adds scanned candidates to the catalog, resolving artwork and store for
+/// each. Shared by `confirm_games` (one folder, called right after the user
+/// points the app at it) and `sync_library` (every already-registered
+/// folder, called from the gallery's Sync button) so the add-a-game logic
+/// only lives in one place. Candidates already in the catalog (same folder
+/// path) are skipped rather than duplicated.
+pub fn add_confirmed_games(
+    catalog: &mut Catalog,
+    artwork_dir: &Path,
+    games: Vec<ConfirmedGame>,
+    steamgriddb_key: Option<&str>,
+) {
+    for g in games {
+        if catalog
+            .games
+            .iter()
+            .any(|existing| existing.folder_path == g.folder_path)
+        {
+            continue;
+        }
+
+        let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&g.folder_path)));
+        let artwork_path =
+            resolve_game_artwork(&g.name, &g.folder_path, &g.exe_path, &dest, steamgriddb_key)
+                .map(|p| p.to_string_lossy().to_string());
+
+        let store = crate::launch::detect_store(Path::new(&g.folder_path));
+
+        catalog.games.push(Game {
+            available: Path::new(&g.exe_path).exists(),
+            id: g.folder_path.clone(),
+            name: g.name,
+            folder_path: g.folder_path,
+            exe_path: g.exe_path,
+            artwork_path,
+            has_custom_artwork: false,
+            store,
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -189,6 +263,36 @@ mod tests {
             has_custom_artwork: false,
             store: None,
         }
+    }
+
+    #[test]
+    fn add_confirmed_games_skips_already_cataloged_folders_and_adds_new_ones() {
+        let mut catalog = Catalog::default();
+        catalog.games.push(sample_game("C:\\Games\\SomeGame\\Game.exe"));
+
+        let games = vec![
+            ConfirmedGame {
+                folder_path: "C:\\Games\\SomeGame".into(),
+                name: "Duplicate".into(),
+                exe_path: "C:\\Games\\SomeGame\\Game.exe".into(),
+            },
+            ConfirmedGame {
+                folder_path: "C:\\Games\\NewGame".into(),
+                name: "New Game".into(),
+                exe_path: "C:\\Games\\NewGame\\NewGame.exe".into(),
+            },
+        ];
+
+        add_confirmed_games(&mut catalog, Path::new("C:\\nonexistent_artwork_dir"), games, None);
+
+        assert_eq!(catalog.games.len(), 2, "the already-cataloged folder should be skipped");
+        let added = catalog
+            .games
+            .iter()
+            .find(|g| g.folder_path == "C:\\Games\\NewGame")
+            .expect("the new game should have been added");
+        assert_eq!(added.name, "New Game");
+        assert!(!added.available, "exe doesn't actually exist on disk");
     }
 
     #[test]

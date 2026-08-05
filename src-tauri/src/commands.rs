@@ -1,10 +1,10 @@
 // Tauri commands: the IPC surface the frontend calls into. Thin glue over
 // catalog/scan — no business logic lives here beyond wiring app-data paths.
 
-use crate::catalog::{self, Binding, Catalog, CloseBehavior, Game};
+use crate::catalog::{self, Binding, Catalog, CloseBehavior, ConfirmedGame};
 use crate::scan;
 use crate::serial::ReaderState;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
@@ -25,12 +25,16 @@ pub(crate) fn save_catalog(app: &AppHandle, catalog: &Catalog) -> Result<(), Str
     catalog::save(&catalog_path(app)?, catalog).map_err(|e| e.to_string())
 }
 
-/// Games use their folder path as `id` — it's already unique per game, so a
-/// separate uuid dependency would just be more code for the same guarantee.
-fn sanitize_for_filename(id: &str) -> String {
-    id.chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect()
+/// Where artwork gets written, and the SteamGridDB key to try first (only
+/// if it's actually reachable right now -- see `steamgriddb_reachable`'s
+/// doc comment). Shared by every command that resolves or re-resolves
+/// artwork so this lookup only lives in one place.
+fn artwork_resolution_context(app: &AppHandle) -> Result<(PathBuf, Option<String>), String> {
+    let artwork_dir = catalog_path(app)?.parent().unwrap().join("artwork");
+    let steamgriddb_key = std::env::var("STEAMGRIDDB_API_KEY")
+        .ok()
+        .filter(|key| scan::steamgriddb_reachable(key));
+    Ok((artwork_dir, steamgriddb_key))
 }
 
 #[derive(Debug, Serialize)]
@@ -39,14 +43,6 @@ pub struct ScanCandidateDto {
     pub folder_path: String,
     pub name: String,
     pub exe_path: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmedGame {
-    pub folder_path: String,
-    pub name: String,
-    pub exe_path: String,
 }
 
 /// Loads the catalog, rescanning game availability first so the gallery
@@ -101,80 +97,65 @@ pub fn remove_root_folder(app: AppHandle, path: String) -> Result<Catalog, Strin
     Ok(catalog)
 }
 
-/// Resolves and writes artwork for one game: SteamGridDB first when a
-/// (reachability-checked) key is available, local folder art / exe icon
-/// otherwise or on any SteamGridDB failure. Shared by `confirm_games` and
-/// `refresh_all_artwork` so the fallback chain only lives in one place.
-fn resolve_game_artwork(
-    name: &str,
-    folder_path: &str,
-    exe_path: &str,
-    dest: &std::path::Path,
-    steamgriddb_key: Option<&str>,
-) -> Option<PathBuf> {
-    steamgriddb_key
-        .and_then(|key| scan::fetch_steamgriddb_grid(name, key, dest))
-        .or_else(|| {
-            scan::resolve_artwork(
-                std::path::Path::new(folder_path),
-                Some(std::path::Path::new(exe_path)),
-                dest,
-            )
-        })
-}
-
-/// Persists scanned candidates the user has explicitly reviewed and
-/// confirmed (per-row exe path, possibly hand-corrected) — this is the
-/// only path that adds a Game to the catalog, per the spec's Success
-/// Criteria ("no path from scan to bound-and-launchable without a confirm
-/// step"). Candidates already in the catalog (same folder path) are
-/// skipped rather than duplicated.
+/// Adds every game the frontend already scanned and auto-filtered from one
+/// folder (unambiguous exe detected, per `ScanCandidateDto.exePath`).
 #[tauri::command]
 pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
-    let artwork_dir = catalog_path(&app)?.parent().unwrap().join("artwork");
-    // Checked once per batch, not per game -- see steamgriddb_reachable's
-    // doc comment for why (bounds the offline-batch cost to one short
-    // check instead of every game paying its own timeout chain).
-    let steamgriddb_key = std::env::var("STEAMGRIDDB_API_KEY")
-        .ok()
-        .filter(|key| scan::steamgriddb_reachable(key));
+    let (artwork_dir, steamgriddb_key) = artwork_resolution_context(&app)?;
 
-    for g in games {
-        if catalog
-            .games
-            .iter()
-            .any(|existing| existing.folder_path == g.folder_path)
-        {
-            continue;
-        }
-
-        let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&g.folder_path)));
-        let artwork_path = resolve_game_artwork(
-            &g.name,
-            &g.folder_path,
-            &g.exe_path,
-            &dest,
-            steamgriddb_key.as_deref(),
-        )
-        .map(|p| p.to_string_lossy().to_string());
-
-        let store = crate::launch::detect_store(std::path::Path::new(&g.folder_path));
-
-        catalog.games.push(Game {
-            available: std::path::Path::new(&g.exe_path).exists(),
-            id: g.folder_path.clone(),
-            name: g.name,
-            folder_path: g.folder_path,
-            exe_path: g.exe_path,
-            artwork_path,
-            has_custom_artwork: false,
-            store,
-        });
-    }
+    catalog::add_confirmed_games(&mut catalog, &artwork_dir, games, steamgriddb_key.as_deref());
 
     save_catalog(&app, &catalog)?;
     Ok(catalog)
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncResult {
+    pub catalog: Catalog,
+    pub added: usize,
+    pub skipped_names: Vec<String>,
+}
+
+/// Rescans every already-registered root folder and adds any game not yet
+/// in the catalog -- the gallery's "Sync" action. Only picks up candidates
+/// with an unambiguous exe (same auto-detection `scan_folder` already
+/// does); a folder `scan_new_games` can't confidently name an exe for goes
+/// into `skipped_names` instead, since there's no review step left to ask
+/// the user which one to use.
+#[tauri::command]
+pub fn sync_library(app: AppHandle) -> Result<SyncResult, String> {
+    let mut catalog = load_catalog(&app)?;
+    let (artwork_dir, steamgriddb_key) = artwork_resolution_context(&app)?;
+
+    let known_folder_paths: Vec<String> =
+        catalog.games.iter().map(|g| g.folder_path.clone()).collect();
+    let candidates = scan::scan_new_games(&catalog.settings.root_folders, &known_folder_paths);
+    // scan_new_games only omits a candidate for being already-known; an
+    // undetected exe still comes back with exe_path: None here, so this is
+    // the one place left that can tell "found but unaddable" apart from
+    // "nothing new at all" -- and report which ones, rather than trusting
+    // a scan_new_games invariant this file would otherwise have to unwrap
+    // blindly.
+    let mut new_games = Vec::new();
+    let mut skipped_names = Vec::new();
+    for c in candidates {
+        match c.exe_path {
+            Some(exe_path) => new_games.push(ConfirmedGame {
+                folder_path: c.folder_path,
+                name: c.name,
+                exe_path,
+            }),
+            None => skipped_names.push(c.name),
+        }
+    }
+
+    let added = new_games.len();
+    catalog::add_confirmed_games(&mut catalog, &artwork_dir, new_games, steamgriddb_key.as_deref());
+
+    save_catalog(&app, &catalog)?;
+    Ok(SyncResult { catalog, added, skipped_names })
 }
 
 /// Re-resolves artwork for every already-cataloged game, overwriting the
@@ -186,10 +167,7 @@ pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalo
 #[tauri::command]
 pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
-    let artwork_dir = catalog_path(&app)?.parent().unwrap().join("artwork");
-    let steamgriddb_key = std::env::var("STEAMGRIDDB_API_KEY")
-        .ok()
-        .filter(|key| scan::steamgriddb_reachable(key));
+    let (artwork_dir, steamgriddb_key) = artwork_resolution_context(&app)?;
 
     catalog::backfill_stores(&mut catalog);
 
@@ -197,8 +175,8 @@ pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
         if game.has_custom_artwork {
             continue;
         }
-        let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&game.id)));
-        if let Some(path) = resolve_game_artwork(
+        let dest = artwork_dir.join(format!("{}.png", catalog::sanitize_for_filename(&game.id)));
+        if let Some(path) = catalog::resolve_game_artwork(
             &game.name,
             &game.folder_path,
             &game.exe_path,
@@ -246,7 +224,7 @@ pub fn set_custom_artwork(
         .find(|g| g.id == game_id)
         .ok_or_else(|| format!("no game with id '{game_id}'"))?;
 
-    let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&game.id)));
+    let dest = artwork_dir.join(format!("{}.png", catalog::sanitize_for_filename(&game.id)));
     let image = image::open(&source_path).map_err(|e| e.to_string())?;
     image.save(&dest).map_err(|e| e.to_string())?;
 

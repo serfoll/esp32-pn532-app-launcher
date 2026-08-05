@@ -2,16 +2,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Catalog, Game, ScanCandidate } from './types'
+import type { Catalog, Game, ScanCandidate, SyncResult } from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
 import { renderSettings } from './settings/settings'
-import {
-  renderScanReview,
-  collectConfirmedGames,
-  renderBindDialog,
-  renderBindingsList,
-} from './binding/binding'
+import { renderBindDialog, renderBindingsList, type ConfirmedGameInput } from './binding/binding'
 import { appendLog } from './log/log'
 
 let catalog: Catalog
@@ -70,14 +65,9 @@ const simulateBtn = document.querySelector<HTMLButtonElement>(
   '#simulate-tag-button',
 )!
 
-const scanReviewDialog = document.querySelector<HTMLDialogElement>(
-  '#scan-review-dialog',
+const syncLibraryButton = document.querySelector<HTMLButtonElement>(
+  '#sync-library-button',
 )!
-const scanReviewList = document.querySelector<HTMLElement>('#scan-review-list')!
-const scanReviewConfirmBtn = document.querySelector<HTMLButtonElement>(
-  '#scan-review-confirm',
-)!
-let scanReviewFolderPath = ''
 
 const bindDialog = document.querySelector<HTMLDialogElement>('#bind-dialog')!
 const bindTagLabel = document.querySelector<HTMLElement>('#bind-tag-uid')!
@@ -277,13 +267,71 @@ async function loadReaderState(): Promise<void> {
 }
 
 async function handleAddFolder(path: string): Promise<void> {
+  showProgressDialog('Adding folder...')
   const candidates = await invokeOrAlert<ScanCandidate[]>('scan_folder', {
     path,
   })
-  if (!candidates) return
-  scanReviewFolderPath = path
-  renderScanReview(scanReviewList, candidates)
-  scanReviewDialog.showModal()
+  if (!candidates) {
+    progressDialog.close()
+    return
+  }
+
+  const skipped = candidates.filter((c) => c.exePath === null)
+  const games: ConfirmedGameInput[] = candidates
+    .filter((c): c is ScanCandidate & { exePath: string } => c.exePath !== null)
+    .map((c) => ({ folderPath: c.folderPath, name: c.name, exePath: c.exePath }))
+
+  if (skipped.length > 0) {
+    log(
+      `Skipped ${skipped.length} folder(s) in "${path}" (couldn't detect an exe): ` +
+        skipped.map((c) => c.name).join(', '),
+    )
+  }
+
+  const confirmResult = await invokeOrAlert<Catalog>('confirm_games', { games })
+  if (!confirmResult) {
+    progressDialog.close()
+    return
+  }
+
+  const result = await invokeOrAlert<Catalog>('add_root_folder', { path })
+  progressDialog.close()
+  if (!result) return
+  catalog = result
+  refresh()
+
+  if (games.length === 0 && skipped.length === 0) {
+    showToast(`No games found in "${path}".`)
+  } else {
+    showToast(
+      `Added ${games.length} game(s) from "${path}".` +
+        (skipped.length > 0 ? ` ${skipped.length} skipped: exe not detected (see Logs).` : ''),
+    )
+  }
+}
+
+async function handleSyncLibrary(): Promise<void> {
+  showProgressDialog('Syncing library...')
+  const result = await invokeOrAlert<SyncResult>('sync_library')
+  progressDialog.close()
+  if (!result) return
+  catalog = result.catalog
+  refresh()
+
+  if (result.skippedNames.length > 0) {
+    log(`Sync skipped ${result.skippedNames.length} folder(s) (couldn't detect an exe): ${result.skippedNames.join(', ')}`)
+  }
+
+  if (result.added === 0 && result.skippedNames.length === 0) {
+    showToast('Library is up to date.')
+  } else {
+    showToast(
+      `Added ${result.added} new game(s).` +
+        (result.skippedNames.length > 0
+          ? ` ${result.skippedNames.length} skipped: exe not detected (see Logs).`
+          : ''),
+    )
+  }
 }
 
 async function handleRefreshArtwork(): Promise<void> {
@@ -566,17 +614,7 @@ function triggerSimulatedTagEvent(): void {
   }
 }
 
-scanReviewConfirmBtn.addEventListener('click', async () => {
-  const games = collectConfirmedGames(scanReviewList)
-  if (!(await invokeOrAlert<Catalog>('confirm_games', { games }))) return
-  const result = await invokeOrAlert<Catalog>('add_root_folder', {
-    path: scanReviewFolderPath,
-  })
-  if (!result) return
-  catalog = result
-  scanReviewDialog.close()
-  refresh()
-})
+syncLibraryButton.addEventListener('click', () => handleSyncLibrary())
 
 bindConfirmBtn.addEventListener('click', async () => {
   const gameId = bindSelect.value

@@ -40,7 +40,7 @@ export function renderSettings(
   input.required = true;
   const scanButton = document.createElement("button");
   scanButton.type = "submit";
-  scanButton.textContent = "Scan folder";
+  scanButton.textContent = "Add folder";
   const browseButton = document.createElement("button");
   browseButton.type = "button";
   browseButton.textContent = "Browse...";
