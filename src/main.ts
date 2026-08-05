@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Catalog, ScanCandidate } from './types'
+import type { Catalog, Game, ScanCandidate } from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
 import { renderSettings } from './settings/settings'
@@ -24,7 +24,7 @@ const viewGallery = document.querySelector<HTMLElement>('#view-gallery')!
 const viewBindings = document.querySelector<HTMLElement>('#view-bindings')!
 const navGallery = document.querySelector<HTMLAnchorElement>('#nav-gallery')!
 const navBindings = document.querySelector<HTMLAnchorElement>('#nav-bindings')!
-const alertBanner = document.querySelector<HTMLElement>('#alert-banner')!
+const toastContainerEl = document.querySelector<HTMLElement>('#toast-container')!
 const readerStatusEl = document.querySelector<HTMLElement>('#reader-status')!
 
 const appMenuToggle =
@@ -116,6 +116,19 @@ const closePromptMinimizeBtn = document.querySelector<HTMLButtonElement>(
 const closePromptQuitBtn =
   document.querySelector<HTMLButtonElement>('#close-prompt-quit')!
 
+const progressDialog = document.querySelector<HTMLDialogElement>(
+  '#progress-dialog',
+)!
+const progressDialogMessageEl = document.querySelector<HTMLElement>(
+  '#progress-dialog-message',
+)!
+const launchErrorDialog = document.querySelector<HTMLDialogElement>(
+  '#launch-error-dialog',
+)!
+const launchErrorMessageEl = document.querySelector<HTMLElement>(
+  '#launch-error-message',
+)!
+
 const READER_STATUS_LABEL: Record<string, string> = {
   disconnected: 'Reader: disconnected',
   connectedUnknownFirmware: 'Reader: connected, needs firmware update',
@@ -127,9 +140,40 @@ function updateReaderStatus(state: string): void {
   readerStatusEl.className = `reader-status reader-status--${state}`
 }
 
+const TOAST_AUTO_DISMISS_MS = 5000
+
 function showAlert(message: string): void {
-  alertBanner.textContent = message
-  alertBanner.hidden = false
+  const toast = document.createElement('div')
+  toast.className = 'toast'
+
+  const text = document.createElement('span')
+  text.className = 'toast-message'
+  text.textContent = message
+  toast.appendChild(text)
+
+  const dismissBtn = document.createElement('button')
+  dismissBtn.type = 'button'
+  dismissBtn.className = 'toast-dismiss'
+  dismissBtn.setAttribute('aria-label', 'Dismiss')
+  dismissBtn.textContent = '×'
+  // .remove() is a no-op if the toast is already gone, so this and the
+  // auto-dismiss timeout below can't double-fire into an error.
+  dismissBtn.addEventListener('click', () => toast.remove())
+  toast.appendChild(dismissBtn)
+
+  toastContainerEl.appendChild(toast)
+  setTimeout(() => toast.remove(), TOAST_AUTO_DISMISS_MS)
+}
+
+// Shared by any long-ish backend call (launching a game, refreshing
+// artwork) that wants a modal "this is in progress" indicator instead of
+// silently blocking the UI. Closes any dialog already open under this id
+// first -- showModal() throws if called on a dialog that's already open,
+// which two overlapping progress operations could otherwise hit.
+function showProgressDialog(message: string): void {
+  if (progressDialog.open) progressDialog.close()
+  progressDialogMessageEl.textContent = message
+  progressDialog.showModal()
 }
 
 function log(message: string): void {
@@ -168,7 +212,7 @@ function showSettingsSection(name: 'general' | 'game' | 'dev'): void {
 }
 
 function refresh(): void {
-  renderGallery(galleryEl, catalog.games, { onContextMenu: showContextMenu })
+  renderGalleryView()
   renderSettings(settingsEl, catalog.settings, {
     onAddFolder: handleAddFolder,
     onRemoveFolder: handleRemoveFolder,
@@ -237,8 +281,10 @@ async function handleAddFolder(path: string): Promise<void> {
 }
 
 async function handleRefreshArtwork(): Promise<void> {
-  showAlert('Refreshing artwork...')
+  settingsDialog.close()
+  showProgressDialog('Refreshing artwork...')
   const result = await invokeOrAlert<Catalog>('refresh_all_artwork')
+  progressDialog.close()
   if (!result) return
   catalog = result
   refresh()
@@ -359,11 +405,109 @@ async function handleUnbindFromEditDialog(tagUid: string): Promise<void> {
 const RECENT_TAG_EVENT_COOLDOWN_MS = 3000
 const lastHandledTagEventAt = new Map<string, number>()
 
+// Polled instead of pushed: the backend has no way to know when a
+// launched process (or its launcher's real hand-off target) exits, so the
+// frontend asks periodically rather than the backend trying to watch every
+// possible child process tree.
+const RUNNING_GAMES_POLL_INTERVAL_MS = 3000
+// A launcher hand-off (Steam, EA App, etc.) can legitimately take a while
+// to actually spawn its real process -- this is a "stop watching" timeout
+// for the launching dialog, not a failure threshold, matching launchGame's
+// existing under-report-rather-than-false-fail approach.
+const LAUNCH_RUNNING_TIMEOUT_MS = 30000
+let runningGameIds = new Set<string>()
+const runningWaiters = new Map<string, () => void>()
+
+function renderGalleryView(): void {
+  renderGallery(galleryEl, catalog.games, catalog.bindings, runningGameIds, {
+    onContextMenu: showContextMenu,
+    onLaunch: handleLaunchFromGallery,
+  })
+}
+
+async function pollRunningGames(): Promise<void> {
+  if (!catalog) return // can race the initial catalog load, same as tag events
+  const ids = await invokeOrAlert<string[]>('get_running_games')
+  if (!ids) return
+  runningGameIds = new Set(ids)
+  for (const [gameId, resolve] of runningWaiters) {
+    if (runningGameIds.has(gameId)) {
+      runningWaiters.delete(gameId)
+      resolve()
+    }
+  }
+  renderGalleryView()
+}
+
+/** Resolves once gameId shows up as running on a poll tick, or after
+ * timeoutMs regardless. */
+function waitUntilRunning(gameId: string, timeoutMs: number): Promise<void> {
+  if (runningGameIds.has(gameId)) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      runningWaiters.delete(gameId)
+      resolve()
+    }, timeoutMs)
+    runningWaiters.set(gameId, () => {
+      clearTimeout(timeout)
+      resolve()
+    })
+  })
+}
+
+/** Availability check, confirm-before-launch prompt, then the actual
+ * launch_game invoke -- shared by tag-triggered launches and clicking a
+ * game's icon directly in the gallery. Feedback is dialog-based: a
+ * "Launching..." dialog with a progress bar stays open until the game
+ * shows up as running (or waitUntilRunning gives up waiting), success
+ * itself has no dialog since the gallery's running badge is the ongoing
+ * signal, and any failure opens a dismissible error dialog. */
+async function launchGame(game: Game): Promise<void> {
+  if (!game.available) {
+    launchErrorMessageEl.textContent = `"${game.name}" isn't installed/found right now.`
+    launchErrorDialog.showModal()
+    log(`"${game.name}" is unavailable, not launching`)
+    return
+  }
+
+  if (
+    catalog.settings.confirmBeforeLaunch &&
+    !window.confirm(`Launch "${game.name}"?`)
+  ) {
+    log(`Launch of "${game.name}" cancelled at confirm prompt`)
+    return
+  }
+
+  showProgressDialog(`Launching "${game.name}"...`)
+  try {
+    const launched = await invoke<boolean>('launch_game', {
+      exePath: game.exePath,
+      folderPath: game.folderPath,
+    })
+    if (launched) {
+      log(`Launched "${game.name}"`)
+      await waitUntilRunning(game.id, LAUNCH_RUNNING_TIMEOUT_MS)
+    } else {
+      log(`"${game.name}" is already running, not relaunching`)
+    }
+  } catch (e) {
+    log(`Failed to launch "${game.name}": ${e}`)
+    launchErrorMessageEl.textContent = `Couldn't launch "${game.name}": ${e}`
+    launchErrorDialog.showModal()
+  } finally {
+    progressDialog.close()
+  }
+}
+
+function handleLaunchFromGallery(gameId: string): void {
+  const game = catalog.games.find((g) => g.id === gameId)
+  if (game) launchGame(game)
+}
+
 /** Looks up a tag UID against the catalog and reacts: alerts on an
  * unavailable game, opens the bind dialog for an unbound tag, or launches
- * the bound game (with a confirm prompt first if settings.confirmBeforeLaunch
- * is on). Shared by both the real serial "tag-inserted" event and the dev
- * simulate-insert control below. */
+ * the bound game via launchGame. Shared by both the real serial
+ * "tag-inserted" event and the dev simulate-insert control below. */
 async function handleTagEvent(tagUid: string): Promise<void> {
   if (!catalog) return // a real insert can in principle race the initial catalog load
 
@@ -394,38 +538,8 @@ async function handleTagEvent(tagUid: string): Promise<void> {
     log(`Tag ${tagUid} is bound to a game that's no longer in the catalog`)
     return
   }
-  if (!game.available) {
-    showAlert(
-      `"${game.name}" is bound to this tag but isn't installed/found right now.`,
-    )
-    log(`"${game.name}" is unavailable, not launching`)
-    return
-  }
 
-  if (
-    catalog.settings.confirmBeforeLaunch &&
-    !window.confirm(`Launch "${game.name}"?`)
-  ) {
-    log(`Launch of "${game.name}" cancelled at confirm prompt`)
-    return
-  }
-
-  try {
-    const launched = await invoke<boolean>('launch_game', {
-      exePath: game.exePath,
-      folderPath: game.folderPath,
-    })
-    if (launched) {
-      showAlert(`Launched "${game.name}".`)
-      log(`Launched "${game.name}"`)
-    } else {
-      showAlert(`"${game.name}" is already running.`)
-      log(`"${game.name}" is already running, not relaunching`)
-    }
-  } catch (e) {
-    showAlert(`Couldn't launch "${game.name}": ${e}`)
-    log(`Failed to launch "${game.name}": ${e}`)
-  }
+  await launchGame(game)
 }
 
 function triggerSimulatedTagEvent(): void {
@@ -607,4 +721,6 @@ window.addEventListener('DOMContentLoaded', () => {
   showView('gallery')
   loadCatalog()
   loadReaderState()
+  pollRunningGames()
+  setInterval(pollRunningGames, RUNNING_GAMES_POLL_INTERVAL_MS)
 })

@@ -112,7 +112,7 @@ fn resolve_game_artwork(
     steamgriddb_key: Option<&str>,
 ) -> Option<PathBuf> {
     steamgriddb_key
-        .and_then(|key| scan::fetch_steamgriddb_icon(name, key, dest))
+        .and_then(|key| scan::fetch_steamgriddb_grid(name, key, dest))
         .or_else(|| {
             scan::resolve_artwork(
                 std::path::Path::new(folder_path),
@@ -341,6 +341,24 @@ pub fn launch_game(exe_path: String, folder_path: String) -> Result<bool, String
     }
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Returns the IDs of games with a process currently running from their
+/// install folder. Polled by the frontend to keep each game card's
+/// "running" badge in sync -- batched through `running_folders` so a
+/// library of many games costs one process-list scan per poll, not one per
+/// game.
+#[tauri::command]
+pub fn get_running_games(app: AppHandle) -> Result<Vec<String>, String> {
+    let catalog = load_catalog(&app)?;
+    let folder_paths: Vec<&str> = catalog.games.iter().map(|g| g.folder_path.as_str()).collect();
+    let running = crate::launch::running_folders(folder_paths);
+    Ok(catalog
+        .games
+        .iter()
+        .filter(|g| running.contains(&g.folder_path))
+        .map(|g| g.id.clone())
+        .collect())
 }
 
 /// Answers the first-close prompt (lib.rs's window close-event handler

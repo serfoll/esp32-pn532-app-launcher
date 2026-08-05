@@ -36,8 +36,7 @@ body {
 }
 
 .titlebar,
-.app-header,
-.alert-banner {
+.app-header {
   flex-shrink: 0;
 }
 
@@ -226,12 +225,57 @@ button:active {
   background-color: #e8e8e8;
 }
 
-.alert-banner {
-  margin: 0 1.5em;
+.toast-container {
+  position: fixed;
+  top: calc(var(--titlebar-height) + 0.75em);
+  right: 0.75em;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  max-width: 320px;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
   padding: 0.75em 1em;
   border-radius: 8px;
   background-color: #fff3cd;
   color: #664d03;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  animation: toast-in 0.15s ease;
+}
+
+.toast-message {
+  flex: 1;
+}
+
+.toast-dismiss {
+  background: none;
+  box-shadow: none;
+  border: none;
+  padding: 0.2em 0.5em;
+  color: inherit;
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+.toast-dismiss:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .gallery-grid {
@@ -252,12 +296,93 @@ button:active {
   opacity: 0.5;
 }
 
-.game-art {
+/* --game-status-color feeds the border color into the base rule plus its
+   own :hover/:active overrides below, so status (bound/unbound) survives
+   interaction instead of getting replaced by the generic button's blue
+   hover/gray active accents. */
+.game-art-button {
+  position: relative;
+  display: block;
   width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 8px;
+  padding: 0;
+  border-width: 3px;
+  border-style: solid;
+  border-color: var(--game-status-color);
+  /* corner-shape only bends border-radius's existing curve into a
+     squircle, so a browser without it yet still gets plain
+     (non-superellipse) rounded corners at the same radius instead of a
+     broken/square fallback. */
+  border-radius: 1rem;
+  corner-shape: squircle;
+  background: none;
+  box-shadow: none;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.game-art-button:hover,
+.game-art-button:active {
+  border-color: var(--game-status-color);
+  background: none;
+}
+
+.game-art-button--bound {
+  --game-status-color: #ffc107;
+}
+
+/* transparent, not no border -- keeps the same 3px box size as the bound
+   state instead of the icon shifting size when the border disappears. */
+.game-art-button--unbound {
+  --game-status-color: transparent;
+}
+
+.game-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: contain;
   background-color: rgba(0, 0, 0, 0.08);
+}
+
+.game-play-icon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5em;
+  color: #ffffff;
+  background-color: rgba(0, 0, 0, 0.35);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+.game-art-button:hover .game-play-icon {
+  opacity: 1;
+}
+
+.game-running-badge {
+  position: absolute;
+  top: 0.5em;
+  left: 0.5em;
+  width: 1.25em;
+  height: 1.25em;
+  border-radius: 50%;
+  background-color: #ff9800;
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  animation: game-running-pulse 2s ease-in-out infinite;
+}
+
+@keyframes game-running-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.6);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(255, 152, 0, 0);
+  }
 }
 
 .empty-state {
