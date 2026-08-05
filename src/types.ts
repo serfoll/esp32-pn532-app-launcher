@@ -43,3 +43,8 @@ export interface SyncResult {
   added: number;
   skippedNames: string[];
 }
+
+export interface ConfirmResult {
+  catalog: Catalog;
+  added: number;
+}

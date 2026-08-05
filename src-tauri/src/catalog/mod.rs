@@ -254,7 +254,8 @@ pub fn add_confirmed_games(
     artwork_dir: &Path,
     games: Vec<ConfirmedGame>,
     steamgriddb_key: Option<&str>,
-) {
+) -> usize {
+    let mut added = 0;
     for g in games {
         if catalog
             .games
@@ -281,7 +282,9 @@ pub fn add_confirmed_games(
             has_custom_artwork: false,
             store,
         });
+        added += 1;
     }
+    added
 }
 
 #[cfg(test)]
@@ -335,16 +338,18 @@ mod tests {
             },
         ];
 
-        add_confirmed_games(&mut catalog, Path::new("C:\\nonexistent_artwork_dir"), games, None);
+        let added_count =
+            add_confirmed_games(&mut catalog, Path::new("C:\\nonexistent_artwork_dir"), games, None);
 
+        assert_eq!(added_count, 1, "only the new game should count as added, not the skipped duplicate");
         assert_eq!(catalog.games.len(), 2, "the already-cataloged folder should be skipped");
-        let added = catalog
+        let new_game = catalog
             .games
             .iter()
             .find(|g| g.folder_path == "C:\\Games\\NewGame")
             .expect("the new game should have been added");
-        assert_eq!(added.name, "New Game");
-        assert!(!added.available, "exe doesn't actually exist on disk");
+        assert_eq!(new_game.name, "New Game");
+        assert!(!new_game.available, "exe doesn't actually exist on disk");
     }
 
     #[test]

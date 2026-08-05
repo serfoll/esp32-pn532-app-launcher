@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Catalog, Game, ScanCandidate, SyncResult } from './types'
+import type { Catalog, ConfirmResult, Game, ScanCandidate, SyncResult } from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
 import { renderSettings } from './settings/settings'
@@ -300,7 +300,7 @@ async function handleAddFolder(path: string): Promise<void> {
     )
   }
 
-  const confirmResult = await invokeOrAlert<Catalog>('confirm_games', { games })
+  const confirmResult = await invokeOrAlert<ConfirmResult>('confirm_games', { games })
   if (!confirmResult) {
     progressDialog.close()
     return
@@ -312,11 +312,18 @@ async function handleAddFolder(path: string): Promise<void> {
   catalog = result
   refresh()
 
+  // confirmResult.added, not games.length -- re-adding a previously
+  // removed folder finds the same candidates again, but confirm_games
+  // skips ones already in the catalog (they were never deleted, only
+  // marked unavailable), so games.length can overstate what actually got
+  // (re)confirmed.
   if (games.length === 0 && skipped.length === 0) {
     showToast(`No games found in "${path}".`)
+  } else if (confirmResult.added === 0) {
+    showToast(`"${path}" is already in your library.`)
   } else {
     showToast(
-      `Added ${games.length} game(s) from "${path}".` +
+      `Added ${confirmResult.added} game(s) from "${path}".` +
         (skipped.length > 0 ? ` ${skipped.length} skipped: exe not detected (see Logs).` : ''),
     )
   }

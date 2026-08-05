@@ -91,6 +91,12 @@ pub fn add_root_folder(app: AppHandle, path: String) -> Result<Catalog, String> 
     if !catalog.settings.root_folders.contains(&path) {
         catalog.settings.root_folders.push(path);
     }
+    // Re-adding a folder that was previously removed: its games never got
+    // deleted (removal only marks them unavailable, per this codebase's
+    // never-silently-delete rule), so confirm_games' dedup-by-folder-path
+    // check just skipped them as "already cataloged" -- nothing else would
+    // notice they're valid again until the next full catalog load.
+    catalog::rescan_availability(&mut catalog);
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
@@ -109,17 +115,29 @@ pub fn remove_root_folder(app: AppHandle, path: String) -> Result<Catalog, Strin
     Ok(catalog)
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmResult {
+    pub catalog: Catalog,
+    pub added: usize,
+}
+
 /// Adds every game the frontend already scanned and auto-filtered from one
 /// folder (unambiguous exe detected, per `ScanCandidateDto.exePath`).
+/// `added` can be less than `games.len()` -- re-adding a previously
+/// removed folder finds the same candidates again, but its games were
+/// never deleted (only marked unavailable), so add_confirmed_games' dedup
+/// skips them here; the frontend needs the real count to report honestly
+/// rather than assuming every candidate it sent got added.
 #[tauri::command]
-pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalog, String> {
+pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<ConfirmResult, String> {
     let mut catalog = load_catalog(&app)?;
     let (artwork_dir, steamgriddb_key) = artwork_resolution_context(&app)?;
 
-    catalog::add_confirmed_games(&mut catalog, &artwork_dir, games, steamgriddb_key.as_deref());
+    let added = catalog::add_confirmed_games(&mut catalog, &artwork_dir, games, steamgriddb_key.as_deref());
 
     save_catalog(&app, &catalog)?;
-    Ok(catalog)
+    Ok(ConfirmResult { catalog, added })
 }
 
 #[derive(Debug, Serialize)]
@@ -163,8 +181,7 @@ pub fn sync_library(app: AppHandle) -> Result<SyncResult, String> {
         }
     }
 
-    let added = new_games.len();
-    catalog::add_confirmed_games(&mut catalog, &artwork_dir, new_games, steamgriddb_key.as_deref());
+    let added = catalog::add_confirmed_games(&mut catalog, &artwork_dir, new_games, steamgriddb_key.as_deref());
 
     save_catalog(&app, &catalog)?;
     Ok(SyncResult { catalog, added, skipped_names })
