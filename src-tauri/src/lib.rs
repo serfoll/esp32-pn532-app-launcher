@@ -45,6 +45,7 @@ pub fn run() {
             commands::unbind_tag,
             commands::update_settings,
             commands::launch_game,
+            commands::get_running_games,
             commands::get_reader_state,
             commands::resolve_close_prompt,
         ])

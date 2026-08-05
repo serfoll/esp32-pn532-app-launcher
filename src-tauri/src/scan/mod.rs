@@ -181,7 +181,7 @@ fn ensure_parent_dir(dest: &Path) -> Option<()> {
 /// picked it, it's usually nicer than an exe icon), otherwise falls back to
 /// the exe's embedded icon. Writes the result to `dest` and returns it, or
 /// `None` if neither source is available. This is the fully-offline path —
-/// see `fetch_steamgriddb_icon` for the opportunistic online lookup that
+/// see `fetch_steamgriddb_grid` for the opportunistic online lookup that
 /// runs before this as a first choice, when configured.
 pub fn resolve_artwork(folder: &Path, exe_path: Option<&Path>, dest: &Path) -> Option<PathBuf> {
     ensure_parent_dir(dest)?;
@@ -206,21 +206,27 @@ struct SteamGridDbSearchResponse {
 }
 
 #[derive(Deserialize)]
-struct SteamGridDbIcon {
+struct SteamGridDbGrid {
     url: String,
 }
 
 #[derive(Deserialize)]
-struct SteamGridDbIconsResponse {
-    data: Vec<SteamGridDbIcon>,
+struct SteamGridDbGridsResponse {
+    data: Vec<SteamGridDbGrid>,
 }
 
-/// Looks `name` up on SteamGridDB and downloads its top icon to `dest`.
+/// Looks `name` up on SteamGridDB and downloads its top portrait grid (the
+/// tall library-capsule art, not the square icon) to `dest`. Requests
+/// `dimensions=600x900` specifically so results are the portrait style,
+/// not SteamGridDB's wide 460x215 grids — the gallery displays these in a
+/// 2:3 box sized to match 600x900 exactly, and a wide grid fit into that
+/// via `object-fit: contain` would render tiny and mostly empty space
+/// instead of filling the tile like a portrait grid does.
 /// Returns `None` on any failure along the way (offline, bad/missing key,
 /// no match, request error) so the caller can fall back to local artwork
 /// sources — this is an opportunistic enhancement, not a required step, and
 /// a slow/unreachable network must never block adding a game.
-pub fn fetch_steamgriddb_icon(name: &str, api_key: &str, dest: &Path) -> Option<PathBuf> {
+pub fn fetch_steamgriddb_grid(name: &str, api_key: &str, dest: &Path) -> Option<PathBuf> {
     let client = reqwest::blocking::Client::builder()
         .timeout(STEAMGRIDDB_TIMEOUT)
         .build()
@@ -238,16 +244,18 @@ pub fn fetch_steamgriddb_icon(name: &str, api_key: &str, dest: &Path) -> Option<
         .ok()?;
     let game_id = search.data.first()?.id;
 
-    let icons: SteamGridDbIconsResponse = client
-        .get(format!("https://www.steamgriddb.com/api/v2/icons/game/{game_id}"))
+    let grids: SteamGridDbGridsResponse = client
+        .get(format!(
+            "https://www.steamgriddb.com/api/v2/grids/game/{game_id}?dimensions=600x900"
+        ))
         .bearer_auth(api_key)
         .send()
         .ok()?
         .json()
         .ok()?;
-    let icon_url = &icons.data.first()?.url;
+    let grid_url = &grids.data.first()?.url;
 
-    let bytes = client.get(icon_url).send().ok()?.bytes().ok()?;
+    let bytes = client.get(grid_url).send().ok()?.bytes().ok()?;
     let image = image::load_from_memory(&bytes).ok()?;
     ensure_parent_dir(dest)?;
     image.save(dest).ok()?;
@@ -256,7 +264,7 @@ pub fn fetch_steamgriddb_icon(name: &str, api_key: &str, dest: &Path) -> Option<
 
 /// Cheap upfront reachability check for SteamGridDB. `confirm_games` can
 /// process a whole batch of scanned folders at once; without this, a
-/// reachable-but-slow-to-fail network would pay `fetch_steamgriddb_icon`'s
+/// reachable-but-slow-to-fail network would pay `fetch_steamgriddb_grid`'s
 /// full per-request timeout up to three times *per game* in the batch. One
 /// short check up front bounds the offline/unreachable case to a couple of
 /// seconds total instead of compounding across every game.

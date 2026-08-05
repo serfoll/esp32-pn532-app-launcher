@@ -36,7 +36,7 @@
       </nav>
     </header>
 
-    <p id="alert-banner" class="alert-banner" hidden></p>
+    <div id="toast-container" class="toast-container" aria-live="polite"></div>
 
     <main id="view-gallery">
       <div id="gallery-grid" class="gallery-grid"></div>
@@ -158,6 +158,26 @@
         <menu>
           <button id="bind-confirm" type="button">Bind</button>
           <button type="submit">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="progress-dialog">
+      <form method="dialog">
+        <h2 id="progress-dialog-message"></h2>
+        <progress></progress>
+        <menu>
+          <button type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="launch-error-dialog">
+      <form method="dialog">
+        <h2>Couldn't launch game</h2>
+        <p id="launch-error-message"></p>
+        <menu>
+          <button type="submit">Close</button>
         </menu>
       </form>
     </dialog>

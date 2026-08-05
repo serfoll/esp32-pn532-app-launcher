@@ -64,14 +64,34 @@ pub fn find_steam_app_id(folder_path: &Path) -> Option<String> {
 /// differ only in case for the exact same file (observed directly: one
 /// returns `_Dev`, the other `_DEV` for this project's own path).
 pub fn is_game_running(folder_path: &str) -> bool {
-    let target = Path::new(&folder_path.to_lowercase()).to_path_buf();
+    running_folders([folder_path]).contains(folder_path)
+}
+
+/// Same folder-prefix check as `is_game_running`, batched across every
+/// folder passed in against a single process-list scan -- badging every
+/// game's running state on each poll tick would otherwise re-scan all
+/// system processes once per game instead of once total.
+pub fn running_folders<'a, I>(folder_paths: I) -> std::collections::HashSet<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
     let mut system = sysinfo::System::new_all();
     system.refresh_processes(sysinfo::ProcessesToUpdate::All, true);
-    system.processes().values().any(|p| {
-        p.exe().is_some_and(|exe| {
-            Path::new(&exe.to_string_lossy().to_lowercase()).starts_with(&target)
+    let running_exes: Vec<String> = system
+        .processes()
+        .values()
+        .filter_map(|p| p.exe())
+        .map(|exe| exe.to_string_lossy().to_lowercase())
+        .collect();
+
+    folder_paths
+        .into_iter()
+        .filter(|folder_path| {
+            let target = Path::new(&folder_path.to_lowercase()).to_path_buf();
+            running_exes.iter().any(|exe| Path::new(exe).starts_with(&target))
         })
-    })
+        .map(|folder_path| folder_path.to_string())
+        .collect()
 }
 
 #[cfg(test)]
@@ -158,5 +178,17 @@ mod tests {
     #[test]
     fn returns_false_for_a_folder_nothing_is_running_from() {
         assert!(!is_game_running(r"C:\definitely\not\a\real\running\folder"));
+    }
+
+    #[test]
+    fn running_folders_finds_the_current_process_among_several_checked_at_once() {
+        let current_exe = std::env::current_exe().unwrap();
+        let folder = current_exe.parent().unwrap().to_str().unwrap();
+        let not_running = r"C:\definitely\not\a\real\running\folder";
+
+        let running = running_folders([not_running, folder]);
+
+        assert_eq!(running.len(), 1);
+        assert!(running.contains(folder));
     }
 }

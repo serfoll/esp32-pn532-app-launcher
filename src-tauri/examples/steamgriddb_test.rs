@@ -13,10 +13,10 @@ fn main() {
     };
 
     let name = std::env::args().nth(1).unwrap_or_else(|| "Sekiro".to_string());
-    let dest = std::env::temp_dir().join("steamgriddb_test_icon.png");
+    let dest = std::env::temp_dir().join("steamgriddb_test_grid.png");
 
-    match cart_reader_lib::scan::fetch_steamgriddb_icon(&name, &key, &dest) {
-        Some(path) => println!("ok: saved icon for '{name}' to {}", path.display()),
-        None => println!("failed: no icon found (or a request/network error) for '{name}'"),
+    match cart_reader_lib::scan::fetch_steamgriddb_grid(&name, &key, &dest) {
+        Some(path) => println!("ok: saved grid for '{name}' to {}", path.display()),
+        None => println!("failed: no grid found (or a request/network error) for '{name}'"),
     }
 }
