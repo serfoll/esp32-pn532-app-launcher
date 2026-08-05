@@ -7,7 +7,14 @@ import {
   disable as disableAutostart,
   isEnabled as isAutostartEnabled,
 } from '@tauri-apps/plugin-autostart'
-import type { Catalog, ConfirmResult, Game, ScanCandidate, SyncResult } from './types'
+import type {
+  Catalog,
+  ConfirmResult,
+  FlashProgressPayload,
+  Game,
+  ScanCandidate,
+  SyncResult,
+} from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
 import { renderSettings } from './settings/settings'
@@ -78,6 +85,9 @@ const simulateInput = document.querySelector<HTMLInputElement>(
 const simulateBtn = document.querySelector<HTMLButtonElement>(
   '#simulate-tag-button',
 )!
+const devFlashFirmwareButton = document.querySelector<HTMLButtonElement>(
+  '#dev-flash-firmware-button',
+)!
 
 const syncLibraryButton = document.querySelector<HTMLButtonElement>(
   '#sync-library-button',
@@ -128,6 +138,9 @@ const progressDialog = document.querySelector<HTMLDialogElement>(
 )!
 const progressDialogMessageEl = document.querySelector<HTMLElement>(
   '#progress-dialog-message',
+)!
+const progressDialogBarEl = document.querySelector<HTMLProgressElement>(
+  '#progress-dialog-bar',
 )!
 // No close button (nothing to cancel -- the underlying command has no
 // abort mechanism and keeps running either way) means Escape shouldn't be
@@ -200,6 +213,7 @@ async function handleFlashFirmware(): Promise<void> {
     return
   }
 
+  lastFlashStage = null
   showProgressDialog('Flashing firmware... this can take a couple of minutes.')
   const result = await invokeOrAlert<null>('flash_firmware')
   progressDialog.close()
@@ -242,6 +256,11 @@ function showToast(message: string): void {
 function showProgressDialog(message: string): void {
   if (progressDialog.open) progressDialog.close()
   progressDialogMessageEl.textContent = message
+  // Indeterminate by default -- only flash-progress events (see below)
+  // turn this into a real percentage bar, and a stale value from a
+  // previous flash shouldn't leak into some other operation's dialog.
+  progressDialogBarEl.removeAttribute('value')
+  progressDialogBarEl.removeAttribute('max')
   progressDialog.showModal()
 }
 
@@ -818,6 +837,7 @@ bindConfirmBtn.addEventListener('click', async () => {
 })
 
 simulateBtn.addEventListener('click', triggerSimulatedTagEvent)
+devFlashFirmwareButton.addEventListener('click', () => handleFlashFirmware())
 simulateInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault()
@@ -939,6 +959,28 @@ listen<string>('reader-error', (event) => {
   showToast(`Reader: ${event.payload}`)
   log(`Reader error: ${event.payload}`)
 })
+// One flash-progress event per espflash callback (init/update/verifying/
+// finish) -- 'writing' fires often (once per chunk written), so only its
+// first occurrence gets logged to the output log; the running percentage
+// goes to the progress dialog instead, which is meant to update rapidly.
+let lastFlashStage: FlashProgressPayload['stage'] | null = null
+listen<FlashProgressPayload>('flash-progress', (event) => {
+  const progress = event.payload
+  if (progress.stage === 'writing') {
+    progressDialogBarEl.max = progress.total
+    progressDialogBarEl.value = progress.current
+    const percent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+    progressDialogMessageEl.textContent = `Flashing firmware... ${percent}%`
+    if (lastFlashStage !== 'writing') log('Writing firmware to the board...')
+  } else if (progress.stage === 'verifying') {
+    progressDialogBarEl.removeAttribute('value')
+    progressDialogBarEl.removeAttribute('max')
+    progressDialogMessageEl.textContent = 'Verifying flash...'
+    log('Verifying flash...')
+  }
+  lastFlashStage = progress.stage
+})
+
 listen('close-requested', () => closePromptDialog.showModal())
 
 // Escape fires the dialog's native 'cancel' event, which would dismiss it

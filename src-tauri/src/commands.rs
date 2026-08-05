@@ -7,7 +7,7 @@ use crate::serial::ReaderState;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // pub(crate): lib.rs's window close-event handler needs to read/write the
 // close_behavior setting without going through a full Tauri command.
@@ -315,18 +315,84 @@ pub fn get_reader_state(state: State<'_, Mutex<ReaderState>>) -> String {
     state.lock().unwrap().as_str().to_string()
 }
 
+/// Progress events emitted to the frontend as `flash-progress` while a
+/// flash is underway -- internally tagged so the JSON payload is
+/// `{"stage":"writing","current":N,"total":N}` / `{"stage":"verifying"}` /
+/// `{"stage":"done"}`, one flat shape the frontend can switch on directly.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "stage", rename_all = "camelCase")]
+enum FlashProgress {
+    Writing { current: usize, total: usize },
+    Verifying,
+    Done,
+}
+
+/// Forwards espflash's progress callbacks to the frontend as Tauri events
+/// instead of the crate's own (terminal-only) default reporting, so the
+/// app's progress dialog can show real percentage rather than a static
+/// indeterminate bar, and the output log can show real stage transitions
+/// instead of nothing at all for the whole multi-minute operation.
+struct TauriProgress {
+    app: AppHandle,
+    total: usize,
+}
+
+impl TauriProgress {
+    fn new(app: AppHandle) -> Self {
+        Self { app, total: 0 }
+    }
+
+    fn emit(&self, progress: FlashProgress) {
+        let _ = self.app.emit("flash-progress", progress);
+    }
+}
+
+impl espflash::target::ProgressCallbacks for TauriProgress {
+    fn init(&mut self, _addr: u32, total: usize) {
+        self.total = total;
+        self.emit(FlashProgress::Writing { current: 0, total });
+    }
+
+    fn update(&mut self, current: usize) {
+        self.emit(FlashProgress::Writing { current, total: self.total });
+    }
+
+    fn verifying(&mut self) {
+        self.emit(FlashProgress::Verifying);
+    }
+
+    fn finish(&mut self, _skipped: bool) {
+        self.emit(FlashProgress::Done);
+    }
+}
+
 /// Flashes the app's bundled firmware to the currently-connected reader.
 /// Sets the shared `flashing` flag around the (blocking, can take a
 /// couple of minutes) flash operation so the watchdog thread steps aside
 /// instead of fighting it for the port -- see `serial::run_watchdog`'s
 /// doc comment.
+///
+/// `async` + `spawn_blocking`, not a plain blocking `fn` -- Tauri runs
+/// non-async commands on the *main* thread by default, which froze the
+/// whole window for the entire flash (confirmed live: title bar showed
+/// "Not Responding"). spawn_blocking moves the actual blocking espflash
+/// work onto its own dedicated thread instead.
 #[tauri::command]
-pub fn flash_firmware(flashing: State<'_, std::sync::Arc<std::sync::atomic::AtomicBool>>) -> Result<(), String> {
+pub async fn flash_firmware(
+    app: AppHandle,
+    flashing: State<'_, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<(), String> {
     let port = crate::serial::find_reader_port()
         .ok_or_else(|| "No reader connected -- plug in the board first".to_string())?;
+    let flashing_flag = flashing.inner().clone();
 
-    let _guard = FlashingGuard::new(&flashing);
-    crate::flash::flash_firmware(&port)
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = FlashingGuard::new(flashing_flag);
+        let mut progress = TauriProgress::new(app);
+        crate::flash::flash_firmware(&port, &mut progress)
+    })
+    .await
+    .map_err(|e| format!("flash task panicked: {e}"))?
 }
 
 /// Sets `flashing` true for its lifetime and back to false on drop --
@@ -334,17 +400,18 @@ pub fn flash_firmware(flashing: State<'_, std::sync::Arc<std::sync::atomic::Atom
 /// `flash::flash_firmware` panics partway through, which a bare pair of
 /// statements wouldn't: the second store would simply never run, leaving
 /// the watchdog thread paused forever with no way to recover short of
-/// restarting the app.
-struct FlashingGuard<'a>(&'a std::sync::atomic::AtomicBool);
+/// restarting the app. Owns the Arc (rather than borrowing) so it can move
+/// into the spawn_blocking closure above, which requires 'static.
+struct FlashingGuard(std::sync::Arc<std::sync::atomic::AtomicBool>);
 
-impl<'a> FlashingGuard<'a> {
-    fn new(flag: &'a std::sync::atomic::AtomicBool) -> Self {
+impl FlashingGuard {
+    fn new(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
         flag.store(true, std::sync::atomic::Ordering::Relaxed);
         Self(flag)
     }
 }
 
-impl Drop for FlashingGuard<'_> {
+impl Drop for FlashingGuard {
     fn drop(&mut self) {
         self.0.store(false, std::sync::atomic::Ordering::Relaxed);
     }

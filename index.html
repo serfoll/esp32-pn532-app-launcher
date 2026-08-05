@@ -134,6 +134,12 @@
                 <input id="simulate-tag-input" placeholder="Tag UID, e.g. 04A3B2C1" />
                 <button id="simulate-tag-button" type="button">Trigger insert</button>
               </div>
+
+              <h3>Flash firmware</h3>
+              <p class="settings-field-hint">
+                Flashes the bundled firmware regardless of what the reader currently reports, for testing the flash itself.
+              </p>
+              <button id="dev-flash-firmware-button" type="button">Flash firmware...</button>
             </section>
           </div>
         </div>
@@ -191,7 +197,7 @@
 
     <dialog id="progress-dialog">
       <h2 id="progress-dialog-message"></h2>
-      <progress></progress>
+      <progress id="progress-dialog-bar"></progress>
     </dialog>
 
     <dialog id="confirm-dialog">

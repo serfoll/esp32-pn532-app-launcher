@@ -4,7 +4,7 @@
 
 use espflash::connection::{Connection, ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::Flasher;
-use espflash::target::DefaultProgressCallback;
+use espflash::target::ProgressCallbacks;
 use std::time::{Duration, Instant};
 
 /// The exact firmware this app knows how to talk to (see
@@ -44,12 +44,16 @@ fn open_port_with_retry(port_name: &str, baud: u32) -> Result<serialport::COMPor
     ))
 }
 
-/// Flashes the bundled firmware to the board on `port_name`. Blocking and
-/// can take anywhere from tens of seconds to a couple of minutes --
-/// callers should run this off whatever thread is servicing the UI.
-/// Board behavior during flashing (DTR/RTS bootloader entry, actual
-/// flash timing) can only be verified against real hardware.
-pub fn flash_firmware(port_name: &str) -> Result<(), String> {
+/// Flashes the bundled firmware to the board on `port_name`, reporting
+/// progress through `progress` (init/update/verifying/finish -- see
+/// `espflash::target::ProgressCallbacks`). Blocking and can take anywhere
+/// from tens of seconds to a couple of minutes -- callers must run this
+/// off the main thread themselves (Tauri runs plain `fn` commands on the
+/// main thread by default, which would otherwise freeze the whole
+/// window for the entire flash). Board behavior during flashing (DTR/RTS
+/// bootloader entry, actual flash timing) can only be verified against
+/// real hardware.
+pub fn flash_firmware(port_name: &str, progress: &mut dyn ProgressCallbacks) -> Result<(), String> {
     let usb_info = serialport::available_ports()
         .map_err(|e| e.to_string())?
         .into_iter()
@@ -80,6 +84,6 @@ pub fn flash_firmware(port_name: &str) -> Result<(), String> {
         .map_err(|e| format!("couldn't connect to the board: {e}"))?;
 
     flasher
-        .write_bin_to_flash(0, FIRMWARE, &mut DefaultProgressCallback)
+        .write_bin_to_flash(0, FIRMWARE, progress)
         .map_err(|e| format!("flash failed: {e}"))
 }

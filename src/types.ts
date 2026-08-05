@@ -48,3 +48,11 @@ export interface ConfirmResult {
   catalog: Catalog;
   added: number;
 }
+
+// Matches the internally-tagged Rust enum emitted as the "flash-progress"
+// event -- {"stage":"writing","current":N,"total":N} / {"stage":"verifying"}
+// / {"stage":"done"}.
+export type FlashProgressPayload =
+  | { stage: "writing"; current: number; total: number }
+  | { stage: "verifying" }
+  | { stage: "done" };
