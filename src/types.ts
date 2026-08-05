@@ -3,7 +3,10 @@ export interface Settings {
   confirmBeforeLaunch: boolean;
   showOutputLog: boolean;
   closeBehavior: "ask" | "minimize" | "quit";
+  showStoreBadges: boolean;
 }
+
+export type Store = "steam";
 
 export interface Game {
   id: string;
@@ -13,6 +16,7 @@ export interface Game {
   artworkPath: string | null;
   available: boolean;
   hasCustomArtwork: boolean;
+  store: Store | null;
 }
 
 export interface Binding {

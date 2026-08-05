@@ -385,6 +385,18 @@ button:active {
   }
 }
 
+.game-store-badge {
+  position: absolute;
+  top: 0.5em;
+  right: 0.5em;
+  width: 1.1em;
+  height: 1.1em;
+  padding: 0.3em;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
 .empty-state {
   color: #666;
 }

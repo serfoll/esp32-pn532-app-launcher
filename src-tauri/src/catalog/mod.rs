@@ -1,10 +1,15 @@
 // Local JSON catalog: games, tag bindings, and settings. Single source of
 // truth for what the gallery shows and what a tag insert launches.
 
+use crate::launch::Store;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
 use std::path::Path;
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -53,6 +58,12 @@ pub struct Settings {
     // the close-behavior prompt existed at all (field missing entirely).
     #[serde(default, deserialize_with = "deserialize_close_behavior")]
     pub close_behavior: CloseBehavior,
+    // #[serde(default = "default_true")] so catalog.json files written
+    // before this field existed still load, defaulting to shown (matches
+    // the toggle's own default) rather than serde's usual missing-bool-is-
+    // false.
+    #[serde(default = "default_true")]
+    pub show_store_badges: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -69,6 +80,12 @@ pub struct Game {
     // result. #[serde(default)] keeps older catalog.json files loadable.
     #[serde(default)]
     pub has_custom_artwork: bool,
+    // #[serde(default)] so catalog.json files written before this field
+    // existed still load (missing -> None, no badge) instead of failing to
+    // parse. Backfilled by the next "Refresh artwork" or rescan, same as
+    // has_custom_artwork.
+    #[serde(default)]
+    pub store: Option<Store>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -96,6 +113,7 @@ impl Default for Catalog {
                 confirm_before_launch: false,
                 show_output_log: false,
                 close_behavior: CloseBehavior::Ask,
+                show_store_badges: true,
             },
             games: Vec::new(),
             bindings: Vec::new(),
@@ -155,6 +173,7 @@ mod tests {
             artwork_path: None,
             available: true,
             has_custom_artwork: false,
+            store: None,
         }
     }
 
@@ -268,6 +287,22 @@ mod tests {
         fs::remove_file(&path).ok();
 
         assert!(!loaded.games[0].has_custom_artwork);
+    }
+
+    #[test]
+    fn loads_pre_store_catalog_with_game_store_defaulted_none_and_setting_defaulted_true() {
+        let path = temp_path("legacy_store_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false},"games":[{"id":"g1","name":"Some Game","folderPath":"C:\\Games\\SomeGame","exePath":"C:\\Games\\SomeGame\\Game.exe","artworkPath":null,"available":true,"hasCustomArtwork":false}],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before store existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.games[0].store, None);
+        assert!(loaded.settings.show_store_badges);
     }
 
     #[test]

@@ -60,6 +60,9 @@ const closeBehaviorSelect = document.querySelector<HTMLSelectElement>(
 const confirmBeforeLaunchCheckbox = document.querySelector<HTMLInputElement>(
   '#confirm-before-launch-checkbox',
 )!
+const showStoreBadgesCheckbox = document.querySelector<HTMLInputElement>(
+  '#show-store-badges-checkbox',
+)!
 const simulateInput = document.querySelector<HTMLInputElement>(
   '#simulate-tag-input',
 )!
@@ -219,6 +222,7 @@ function refresh(): void {
     onRefreshArtwork: handleRefreshArtwork,
   })
   confirmBeforeLaunchCheckbox.checked = catalog.settings.confirmBeforeLaunch
+  showStoreBadgesCheckbox.checked = catalog.settings.showStoreBadges
   renderBindingsList(
     bindingsListEl,
     catalog.bindings,
@@ -236,6 +240,7 @@ async function updateSettings(
     confirmBeforeLaunch: boolean
     showOutputLog: boolean
     closeBehavior: 'ask' | 'minimize' | 'quit'
+    showStoreBadges: boolean
   }>,
 ): Promise<void> {
   const result = await invokeOrAlert<Catalog>('update_settings', {
@@ -243,6 +248,7 @@ async function updateSettings(
     confirmBeforeLaunch: catalog.settings.confirmBeforeLaunch,
     showOutputLog: catalog.settings.showOutputLog,
     closeBehavior: catalog.settings.closeBehavior,
+    showStoreBadges: catalog.settings.showStoreBadges,
     ...overrides,
   })
   if (!result) return
@@ -300,6 +306,10 @@ async function handleRemoveFolder(path: string): Promise<void> {
 
 async function handleToggleConfirmBeforeLaunch(value: boolean): Promise<void> {
   await updateSettings({ confirmBeforeLaunch: value })
+}
+
+async function handleToggleShowStoreBadges(value: boolean): Promise<void> {
+  await updateSettings({ showStoreBadges: value })
 }
 
 async function handleToggleShowOutputLog(value: boolean): Promise<void> {
@@ -421,7 +431,12 @@ const runningWaiters = new Map<string, () => void>()
 function renderGalleryView(): void {
   renderGallery(
     galleryEl,
-    { games: catalog.games, bindings: catalog.bindings, runningGameIds },
+    {
+      games: catalog.games,
+      bindings: catalog.bindings,
+      runningGameIds,
+      showStoreBadges: catalog.settings.showStoreBadges,
+    },
     { onContextMenu: showContextMenu, onLaunch: handleLaunchFromGallery },
   )
 }
@@ -627,6 +642,9 @@ closeBehaviorSelect.addEventListener('change', () =>
 )
 confirmBeforeLaunchCheckbox.addEventListener('change', () =>
   handleToggleConfirmBeforeLaunch(confirmBeforeLaunchCheckbox.checked),
+)
+showStoreBadgesCheckbox.addEventListener('change', () =>
+  handleToggleShowStoreBadges(showStoreBadgesCheckbox.checked),
 )
 
 // The Dev section only makes sense against a running dev server -- a

@@ -1,5 +1,14 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { Binding, Game } from "../types";
+import steamIcon from "../assets/steam.svg";
+import type { Binding, Game, Store } from "../types";
+
+const STORE_ICONS: Record<Store, string> = {
+  steam: steamIcon,
+};
+
+const STORE_NAMES: Record<Store, string> = {
+  steam: "Steam",
+};
 
 // games/bindings/runningGameIds always travel together as "the gallery's
 // current state" -- bundled so renderGallery doesn't keep growing a
@@ -8,6 +17,7 @@ export interface GalleryState {
   games: Game[];
   bindings: Binding[];
   runningGameIds: ReadonlySet<string>;
+  showStoreBadges: boolean;
 }
 
 export interface GalleryHandlers {
@@ -20,7 +30,7 @@ export function renderGallery(
   state: GalleryState,
   handlers: GalleryHandlers,
 ): void {
-  const { games, bindings, runningGameIds } = state;
+  const { games, bindings, runningGameIds, showStoreBadges } = state;
   container.innerHTML = "";
 
   if (games.length === 0) {
@@ -84,6 +94,15 @@ export function renderGallery(
     playIcon.setAttribute("aria-hidden", "true");
     playIcon.textContent = "▶";
     iconButton.appendChild(playIcon);
+
+    if (showStoreBadges && game.store && STORE_ICONS[game.store]) {
+      const storeBadge = document.createElement("img");
+      storeBadge.className = "game-store-badge";
+      storeBadge.src = STORE_ICONS[game.store];
+      storeBadge.alt = "";
+      storeBadge.title = `Installed via ${STORE_NAMES[game.store]}`;
+      iconButton.appendChild(storeBadge);
+    }
 
     if (runningGameIds.has(game.id)) {
       const runningBadge = document.createElement("span");

@@ -3,8 +3,23 @@
 // launcher-installed games are DRM-wrapped stubs that exit silently when
 // run outside their normal launcher instead of showing an error.
 
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+
+/// Storefront a game was installed through, detected at scan time and shown
+/// as a badge on its gallery card. Steam-only for now -- `detect_store` is
+/// the one place a second store's detector would plug in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Store {
+    Steam,
+}
+
+/// Tries each known store detector against `folder_path`, in order.
+pub fn detect_store(folder_path: &Path) -> Option<Store> {
+    find_steam_app_id(folder_path).map(|_| Store::Steam)
+}
 
 /// Extracts one `"key"    "value"` pair from Valve's ACF text format.
 /// Whitespace between key and value varies (tabs in real files, spaces in
@@ -148,6 +163,36 @@ mod tests {
         fs::create_dir_all(&game_dir).unwrap();
 
         let result = find_steam_app_id(&game_dir);
+        fs::remove_dir_all(&root).ok();
+
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn detect_store_maps_a_steam_install_to_store_steam() {
+        let root = temp_root("detect_store_match");
+        let steamapps = root.join("steamapps");
+        let game_dir = steamapps.join("common").join("SomeGame");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(
+            steamapps.join("appmanifest_12345.acf"),
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"12345\"\n\t\"installdir\"\t\t\"SomeGame\"\n}\n",
+        )
+        .unwrap();
+
+        let result = detect_store(&game_dir);
+        fs::remove_dir_all(&root).ok();
+
+        assert_eq!(result, Some(Store::Steam));
+    }
+
+    #[test]
+    fn detect_store_returns_none_for_a_non_steam_install() {
+        let root = temp_root("detect_store_none");
+        let game_dir = root.join("C_Games").join("SomeGame");
+        fs::create_dir_all(&game_dir).unwrap();
+
+        let result = detect_store(&game_dir);
         fs::remove_dir_all(&root).ok();
 
         assert_eq!(result, None);

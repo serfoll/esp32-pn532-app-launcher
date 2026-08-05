@@ -158,6 +158,8 @@ pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalo
         )
         .map(|p| p.to_string_lossy().to_string());
 
+        let store = crate::launch::detect_store(std::path::Path::new(&g.folder_path));
+
         catalog.games.push(Game {
             available: std::path::Path::new(&g.exe_path).exists(),
             id: g.folder_path.clone(),
@@ -166,6 +168,7 @@ pub fn confirm_games(app: AppHandle, games: Vec<ConfirmedGame>) -> Result<Catalo
             exe_path: g.exe_path,
             artwork_path,
             has_custom_artwork: false,
+            store,
         });
     }
 
@@ -188,6 +191,13 @@ pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
         .filter(|key| scan::steamgriddb_reachable(key));
 
     for game in &mut catalog.games {
+        // Backfills games cataloged before store detection existed --
+        // cheap enough (one manifest-file read) to redo unconditionally
+        // here, unlike rescan_availability which runs on every app launch.
+        if game.store.is_none() {
+            game.store = crate::launch::detect_store(std::path::Path::new(&game.folder_path));
+        }
+
         if game.has_custom_artwork {
             continue;
         }
@@ -278,12 +288,14 @@ pub fn update_settings(
     confirm_before_launch: bool,
     show_output_log: bool,
     close_behavior: CloseBehavior,
+    show_store_badges: bool,
 ) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
     catalog.settings.root_folders = root_folders;
     catalog.settings.confirm_before_launch = confirm_before_launch;
     catalog.settings.show_output_log = show_output_log;
     catalog.settings.close_behavior = close_behavior;
+    catalog.settings.show_store_badges = show_store_badges;
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
