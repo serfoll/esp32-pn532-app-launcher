@@ -33,35 +33,16 @@ export function renderSettings(
   }
   container.appendChild(list);
 
-  const form = document.createElement("form");
-  form.className = "add-folder-form";
-  const input = document.createElement("input");
-  input.placeholder = "C:\\Games";
-  input.required = true;
-  const scanButton = document.createElement("button");
-  scanButton.type = "submit";
-  scanButton.textContent = "Add folder";
   const browseButton = document.createElement("button");
   browseButton.type = "button";
-  browseButton.textContent = "Browse...";
+  browseButton.textContent = "+ Add Collection";
   browseButton.addEventListener("click", async () => {
     const selected = await open({ directory: true });
     if (typeof selected === "string") {
       handlers.onAddFolder(selected);
     }
   });
-  form.appendChild(input);
-  form.appendChild(browseButton);
-  form.appendChild(scanButton);
-  form.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const path = input.value.trim();
-    if (path) {
-      handlers.onAddFolder(path);
-      input.value = "";
-    }
-  });
-  container.appendChild(form);
+  container.appendChild(browseButton);
 
   const refreshButton = document.createElement("button");
   refreshButton.type = "button";

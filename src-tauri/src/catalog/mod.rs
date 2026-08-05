@@ -65,6 +65,12 @@ pub struct Settings {
     // false.
     #[serde(default = "default_true")]
     pub show_store_badges: bool,
+    // #[serde(default = "default_true")] so catalog.json files written
+    // before this setting existed still load with the new default-on
+    // behavior, matching the toggle's own default, rather than serde's
+    // usual missing-bool-is-false.
+    #[serde(default = "default_true")]
+    pub sync_on_startup: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -115,6 +121,7 @@ impl Default for Catalog {
                 show_output_log: false,
                 close_behavior: CloseBehavior::Ask,
                 show_store_badges: true,
+                sync_on_startup: true,
             },
             games: Vec::new(),
             bindings: Vec::new(),
@@ -155,6 +162,24 @@ pub fn rescan_availability(catalog: &mut Catalog) {
     }
 }
 
+/// Marks every game whose folder lives under `removed_root` as
+/// unavailable. Used right after a root folder is removed from Settings --
+/// its games' exe files can still physically exist on disk (the folder
+/// itself wasn't deleted, just untracked), so `rescan_availability` alone
+/// wouldn't notice anything changed and the gallery would keep showing
+/// them as if they were still part of the library. Doesn't touch `games`
+/// or `bindings` themselves -- custom artwork and tag bindings survive in
+/// case the same folder gets re-added later, matching
+/// `remove_root_folder`'s existing never-silently-delete rule.
+pub fn mark_unavailable_under(catalog: &mut Catalog, removed_root: &str) {
+    let target = Path::new(&removed_root.to_lowercase()).to_path_buf();
+    for game in &mut catalog.games {
+        if Path::new(&game.folder_path.to_lowercase()).starts_with(&target) {
+            game.available = false;
+        }
+    }
+}
+
 /// Detects the storefront for any game that doesn't have one on record yet
 /// -- covers games cataloged before store detection existed. Cheap enough
 /// (one manifest-file read per game) to run on every catalog load rather
@@ -172,9 +197,22 @@ pub fn backfill_stores(catalog: &mut Catalog) {
 /// Games use their folder path as `id` — it's already unique per game, so a
 /// separate uuid dependency would just be more code for the same guarantee.
 pub fn sanitize_for_filename(id: &str) -> String {
-    id.chars()
+    use std::hash::{Hash, Hasher};
+
+    let readable: String = id
+        .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect()
+        .collect();
+
+    // The character-substitution above isn't injective -- "A-B" and "A_B"
+    // both sanitize to "A_B", so two different games could collide onto
+    // the same artwork file and silently overwrite each other's art. The
+    // hash suffix (of the real, un-substituted id) makes the full result
+    // collision-resistant while keeping the readable prefix for anyone
+    // browsing the artwork folder by hand.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    format!("{readable}_{:x}", hasher.finish())
 }
 
 /// Resolves and writes artwork for one game: SteamGridDB first when a
@@ -252,6 +290,16 @@ mod tests {
         env::temp_dir().join(format!("cart_reader_catalog_test_{}_{}.json", name, std::process::id()))
     }
 
+    #[test]
+    fn sanitize_for_filename_does_not_collide_on_ids_that_share_a_naive_sanitization() {
+        // Both naively sanitize to "C__Games_A_B" (":" "-" "\\" all -> "_"),
+        // which is exactly the collision that let one game's artwork
+        // silently overwrite another's.
+        let a = sanitize_for_filename("C:\\Games\\A-B");
+        let b = sanitize_for_filename("C:\\Games\\A_B");
+        assert_ne!(a, b, "distinct ids must not sanitize to the same filename");
+    }
+
     fn sample_game(exe_path: &str) -> Game {
         Game {
             id: "g1".into(),
@@ -316,6 +364,29 @@ mod tests {
         fs::remove_dir_all(&root).ok();
 
         assert_eq!(catalog.games[0].store, Some(crate::launch::Store::Steam));
+    }
+
+    #[test]
+    fn mark_unavailable_under_marks_only_games_under_the_removed_root() {
+        let mut catalog = Catalog::default();
+
+        let mut removed = sample_game("C:\\Games\\SomeGame\\Game.exe");
+        removed.folder_path = "C:\\Games\\SomeGame".into();
+        removed.id = "removed".into();
+
+        let mut kept = sample_game("D:\\Other\\OtherGame\\Game.exe");
+        kept.folder_path = "D:\\Other\\OtherGame".into();
+        kept.id = "kept".into();
+
+        catalog.games.push(removed);
+        catalog.games.push(kept);
+
+        mark_unavailable_under(&mut catalog, "C:\\Games");
+
+        let removed = catalog.games.iter().find(|g| g.id == "removed").unwrap();
+        let kept = catalog.games.iter().find(|g| g.id == "kept").unwrap();
+        assert!(!removed.available, "game under the removed root should be marked unavailable");
+        assert!(kept.available, "game under an unrelated folder should be untouched");
     }
 
     #[test]
@@ -457,6 +528,21 @@ mod tests {
 
         assert_eq!(loaded.games[0].store, None);
         assert!(loaded.settings.show_store_badges);
+    }
+
+    #[test]
+    fn loads_pre_sync_on_startup_catalog_with_setting_defaulted_true() {
+        let path = temp_path("legacy_sync_on_startup_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false,"showStoreBadges":true},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before syncOnStartup existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert!(loaded.settings.sync_on_startup);
     }
 
     #[test]

@@ -4,6 +4,7 @@ export interface Settings {
   showOutputLog: boolean;
   closeBehavior: "ask" | "minimize" | "quit";
   showStoreBadges: boolean;
+  syncOnStartup: boolean;
 }
 
 export type Store = "steam";

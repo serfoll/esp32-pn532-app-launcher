@@ -62,6 +62,9 @@ pub fn scan_folder(path: String) -> Result<Vec<ScanCandidateDto>, String> {
     if !root.is_dir() {
         return Err(format!("'{path}' doesn't exist or isn't a folder"));
     }
+    if !scan::is_scannable_root(root) {
+        return Err(format!("'{path}' is a protected system folder and can't be added"));
+    }
 
     Ok(scan::scan_root(root)
         .into_iter()
@@ -75,6 +78,15 @@ pub fn scan_folder(path: String) -> Result<Vec<ScanCandidateDto>, String> {
 
 #[tauri::command]
 pub fn add_root_folder(app: AppHandle, path: String) -> Result<Catalog, String> {
+    // Defense in depth alongside scan_folder's own check: a root folder
+    // that scan_root refuses to scan (drive roots, OS-critical
+    // directories) should never even get persisted, since sync would
+    // forever ignore it once it's there -- a dead entry sitting in
+    // Settings with no way to explain to the user why nothing shows up.
+    if !scan::is_scannable_root(std::path::Path::new(&path)) {
+        return Err(format!("'{path}' is a protected system folder and can't be added"));
+    }
+
     let mut catalog = load_catalog(&app)?;
     if !catalog.settings.root_folders.contains(&path) {
         catalog.settings.root_folders.push(path);
@@ -93,6 +105,7 @@ pub fn remove_root_folder(app: AppHandle, path: String) -> Result<Catalog, Strin
     let mut catalog = load_catalog(&app)?;
     catalog.settings.root_folders.retain(|p| p != &path);
     catalog::rescan_availability(&mut catalog);
+    catalog::mark_unavailable_under(&mut catalog, &path);
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
@@ -263,6 +276,7 @@ pub fn update_settings(
     show_output_log: bool,
     close_behavior: CloseBehavior,
     show_store_badges: bool,
+    sync_on_startup: bool,
 ) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
     catalog.settings.root_folders = root_folders;
@@ -270,6 +284,7 @@ pub fn update_settings(
     catalog.settings.show_output_log = show_output_log;
     catalog.settings.close_behavior = close_behavior;
     catalog.settings.show_store_badges = show_store_badges;
+    catalog.settings.sync_on_startup = sync_on_startup;
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }

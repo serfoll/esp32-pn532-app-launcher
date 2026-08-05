@@ -58,6 +58,9 @@ const confirmBeforeLaunchCheckbox = document.querySelector<HTMLInputElement>(
 const showStoreBadgesCheckbox = document.querySelector<HTMLInputElement>(
   '#show-store-badges-checkbox',
 )!
+const syncOnStartupCheckbox = document.querySelector<HTMLInputElement>(
+  '#sync-on-startup-checkbox',
+)!
 const simulateInput = document.querySelector<HTMLInputElement>(
   '#simulate-tag-input',
 )!
@@ -213,6 +216,7 @@ function refresh(): void {
   })
   confirmBeforeLaunchCheckbox.checked = catalog.settings.confirmBeforeLaunch
   showStoreBadgesCheckbox.checked = catalog.settings.showStoreBadges
+  syncOnStartupCheckbox.checked = catalog.settings.syncOnStartup
   renderBindingsList(
     bindingsListEl,
     catalog.bindings,
@@ -232,6 +236,7 @@ async function updateSettings(
     showOutputLog: boolean
     closeBehavior: 'ask' | 'minimize' | 'quit'
     showStoreBadges: boolean
+    syncOnStartup: boolean
   }>,
 ): Promise<void> {
   const result = await invokeOrAlert<Catalog>('update_settings', {
@@ -240,6 +245,7 @@ async function updateSettings(
     showOutputLog: catalog.settings.showOutputLog,
     closeBehavior: catalog.settings.closeBehavior,
     showStoreBadges: catalog.settings.showStoreBadges,
+    syncOnStartup: catalog.settings.syncOnStartup,
     ...overrides,
   })
   if (!result) return
@@ -359,6 +365,10 @@ async function handleToggleConfirmBeforeLaunch(value: boolean): Promise<void> {
 
 async function handleToggleShowStoreBadges(value: boolean): Promise<void> {
   await updateSettings({ showStoreBadges: value })
+}
+
+async function handleToggleSyncOnStartup(value: boolean): Promise<void> {
+  await updateSettings({ syncOnStartup: value })
 }
 
 async function handleToggleShowOutputLog(value: boolean): Promise<void> {
@@ -716,6 +726,9 @@ confirmBeforeLaunchCheckbox.addEventListener('change', () =>
 showStoreBadgesCheckbox.addEventListener('change', () =>
   handleToggleShowStoreBadges(showStoreBadgesCheckbox.checked),
 )
+syncOnStartupCheckbox.addEventListener('change', () =>
+  handleToggleSyncOnStartup(syncOnStartupCheckbox.checked),
+)
 
 // The Dev section only makes sense against a running dev server -- a
 // production build's simulate-tag control would have nothing real to
@@ -808,7 +821,13 @@ closePromptQuitBtn.addEventListener('click', () => resolveClosePrompt(false))
 
 window.addEventListener('DOMContentLoaded', () => {
   showView('gallery')
-  loadCatalog()
+  // Chained rather than awaited inline in this handler -- loadReaderState
+  // and pollRunningGames below shouldn't wait on a sync that can take a
+  // few seconds for a large library; they only need the initial catalog
+  // load, not the sync that may follow it.
+  loadCatalog().then(() => {
+    if (catalog && catalog.settings.syncOnStartup) handleSyncLibrary()
+  })
   loadReaderState()
   pollRunningGames()
   setInterval(pollRunningGames, RUNNING_GAMES_POLL_INTERVAL_MS)

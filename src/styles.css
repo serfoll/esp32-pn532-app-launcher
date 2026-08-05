@@ -549,7 +549,6 @@ button:active {
   }
 }
 
-.add-folder-form,
 .simulate-tag-row {
   display: flex;
   gap: 0.5em;

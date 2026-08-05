@@ -110,7 +110,7 @@ const DANGEROUS_ROOT_NAMES: &[&str] = &[
 /// dialog, but the app's Stop button force-kills every process under a
 /// cataloged game's folder. Scanning `C:\Windows` in would let one Stop
 /// click take down arbitrary running system processes.
-fn is_scannable_root(root: &Path) -> bool {
+pub fn is_scannable_root(root: &Path) -> bool {
     if root.parent().is_none() {
         return false; // drive root: C:\, D:\, ...
     }
