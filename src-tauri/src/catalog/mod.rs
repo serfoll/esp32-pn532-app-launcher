@@ -6,6 +6,40 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CloseBehavior {
+    // Not decided yet -- ask again on the next close.
+    #[default]
+    Ask,
+    Minimize,
+    Quit,
+}
+
+// close_behavior used to be serialized as Option<bool> (None/true/false)
+// before it became this enum. #[serde(default)] alone only covers a
+// *missing* field; a catalog.json already on disk from before this change
+// has the field *present* as `true`/`false`/`null`, which needs an explicit
+// upgrade path here or it fails to parse at all -- confirmed live against a
+// real catalog.json still carrying the old shape.
+fn deserialize_close_behavior<'de, D>(deserializer: D) -> Result<CloseBehavior, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        Legacy(Option<bool>),
+        Current(CloseBehavior),
+    }
+    Ok(match Raw::deserialize(deserializer)? {
+        Raw::Legacy(Some(true)) => CloseBehavior::Minimize,
+        Raw::Legacy(Some(false)) => CloseBehavior::Quit,
+        Raw::Legacy(None) => CloseBehavior::Ask,
+        Raw::Current(behavior) => behavior,
+    })
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
@@ -15,6 +49,10 @@ pub struct Settings {
     // existed still load (missing -> false) instead of failing to parse.
     #[serde(default)]
     pub show_output_log: bool,
+    // #[serde(default)] keeps this Ask for catalog.json files written before
+    // the close-behavior prompt existed at all (field missing entirely).
+    #[serde(default, deserialize_with = "deserialize_close_behavior")]
+    pub close_behavior: CloseBehavior,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -57,6 +95,7 @@ impl Default for Catalog {
                 root_folders: Vec::new(),
                 confirm_before_launch: false,
                 show_output_log: false,
+                close_behavior: CloseBehavior::Ask,
             },
             games: Vec::new(),
             bindings: Vec::new(),
@@ -169,6 +208,51 @@ mod tests {
         fs::remove_file(&path).ok();
 
         assert!(!loaded.settings.show_output_log);
+    }
+
+    #[test]
+    fn loads_pre_close_behavior_catalog_with_field_defaulted_to_ask() {
+        let path = temp_path("legacy_close_behavior");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before closeBehavior existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.settings.close_behavior, CloseBehavior::Ask);
+    }
+
+    #[test]
+    fn loads_bool_close_behavior_catalog_upgrading_to_the_enum() {
+        let path = temp_path("legacy_bool_close_behavior");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false,"closeBehavior":true},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog with the old bool closeBehavior should still load");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.settings.close_behavior, CloseBehavior::Minimize);
+    }
+
+    #[test]
+    fn loads_null_close_behavior_catalog_upgrading_to_ask() {
+        let path = temp_path("legacy_null_close_behavior");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false,"closeBehavior":null},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog with the old null closeBehavior should still load");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.settings.close_behavior, CloseBehavior::Ask);
     }
 
     #[test]

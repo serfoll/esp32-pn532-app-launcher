@@ -1,7 +1,7 @@
 // Tauri commands: the IPC surface the frontend calls into. Thin glue over
 // catalog/scan — no business logic lives here beyond wiring app-data paths.
 
-use crate::catalog::{self, Binding, Catalog, Game};
+use crate::catalog::{self, Binding, Catalog, CloseBehavior, Game};
 use crate::scan;
 use crate::serial::ReaderState;
 use serde::{Deserialize, Serialize};
@@ -9,17 +9,19 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
-fn catalog_path(app: &AppHandle) -> Result<PathBuf, String> {
+// pub(crate): lib.rs's window close-event handler needs to read/write the
+// close_behavior setting without going through a full Tauri command.
+pub(crate) fn catalog_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("catalog.json"))
 }
 
-fn load_catalog(app: &AppHandle) -> Result<Catalog, String> {
+pub(crate) fn load_catalog(app: &AppHandle) -> Result<Catalog, String> {
     catalog::load(&catalog_path(app)?).map_err(|e| e.to_string())
 }
 
-fn save_catalog(app: &AppHandle, catalog: &Catalog) -> Result<(), String> {
+pub(crate) fn save_catalog(app: &AppHandle, catalog: &Catalog) -> Result<(), String> {
     catalog::save(&catalog_path(app)?, catalog).map_err(|e| e.to_string())
 }
 
@@ -275,11 +277,13 @@ pub fn update_settings(
     root_folders: Vec<String>,
     confirm_before_launch: bool,
     show_output_log: bool,
+    close_behavior: CloseBehavior,
 ) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
     catalog.settings.root_folders = root_folders;
     catalog.settings.confirm_before_launch = confirm_before_launch;
     catalog.settings.show_output_log = show_output_log;
+    catalog.settings.close_behavior = close_behavior;
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
@@ -337,4 +341,31 @@ pub fn launch_game(exe_path: String, folder_path: String) -> Result<bool, String
     }
     cmd.spawn().map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Answers the first-close prompt (lib.rs's window close-event handler
+/// shows it by emitting a "close-requested" event instead of letting the
+/// window close, whenever `close_behavior` hasn't been decided yet).
+/// Persists the choice for next time when `remember` is set, then either
+/// hides the window (tray-resident) or actually exits the app.
+#[tauri::command]
+pub fn resolve_close_prompt(app: AppHandle, minimize: bool, remember: bool) -> Result<(), String> {
+    if remember {
+        let mut catalog = load_catalog(&app)?;
+        catalog.settings.close_behavior = if minimize {
+            CloseBehavior::Minimize
+        } else {
+            CloseBehavior::Quit
+        };
+        save_catalog(&app, &catalog)?;
+    }
+
+    if minimize {
+        if let Some(window) = app.get_webview_window("main") {
+            window.hide().map_err(|e| e.to_string())?;
+        }
+    } else {
+        app.exit(0);
+    }
+    Ok(())
 }

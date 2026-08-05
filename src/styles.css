@@ -18,6 +18,42 @@ body {
   margin: 0;
 }
 
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 34px;
+  background-color: rgba(0, 0, 0, 0.15);
+  user-select: none;
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+}
+
+.titlebar-button {
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  font-size: 0.9em;
+  line-height: 1;
+}
+
+.titlebar-button:hover {
+  background-color: rgba(0, 0, 0, 0.1);
+  border-color: transparent;
+}
+
+.titlebar-close:hover {
+  background-color: #e81123;
+  color: #ffffff;
+}
+
 .app-header {
   display: flex;
   align-items: center;
@@ -26,9 +62,87 @@ body {
   border-bottom: 1px solid rgba(0, 0, 0, 0.1);
 }
 
-.app-header h1 {
-  font-size: 1.25em;
-  margin: 0;
+.app-menu {
+  position: relative;
+}
+
+#app-menu-toggle {
+  background: none;
+  box-shadow: none;
+  border: none;
+  padding: 0.4em 0.8em;
+  font-size: 0.9em;
+  font-weight: 600;
+}
+
+#app-menu-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 30;
+  min-width: 190px;
+  background-color: #f6f6f6;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: 0.3em 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* [hidden] has to win over the `display: flex` above, or the browser's
+   default [hidden] { display: none } loses the specificity tie and the
+   menu stays visible (in-flow, not floating) regardless of the attribute. */
+.dropdown-menu[hidden] {
+  display: none;
+}
+
+.dropdown-menu button,
+.dropdown-menu-checkbox {
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+  padding: 0.5em 1em;
+  color: inherit;
+  font-weight: 400;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  cursor: pointer;
+  width: 100%;
+}
+
+.dropdown-menu button:hover,
+.dropdown-menu-checkbox:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+}
+
+nav {
+  display: flex;
+  gap: 1.5em;
+}
+
+.nav-link {
+  color: inherit;
+  text-decoration: none;
+  font-weight: 500;
+  padding: 0.3em 0;
+  border-bottom: 2px solid transparent;
+}
+
+.nav-link:hover {
+  color: #396cd8;
+}
+
+.nav-link.active {
+  border-bottom-color: #396cd8;
 }
 
 .reader-status {
@@ -169,7 +283,7 @@ button:active {
 }
 
 .add-folder-form,
-#simulate-tag-form {
+.simulate-tag-row {
   display: flex;
   gap: 0.5em;
 }
@@ -262,7 +376,21 @@ dialog menu {
   }
 
   dialog,
-  .context-menu {
+  .context-menu,
+  .dropdown-menu {
     background-color: #2f2f2f;
+  }
+
+  #app-menu-toggle:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .dropdown-menu button:hover,
+  .dropdown-menu-checkbox:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .nav-link:hover {
+    color: #24c8db;
   }
 }

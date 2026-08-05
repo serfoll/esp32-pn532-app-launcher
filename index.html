@@ -9,13 +9,30 @@
   </head>
 
   <body>
+    <div class="titlebar" data-tauri-drag-region>
+      <div class="app-menu">
+        <button id="app-menu-toggle" type="button" aria-haspopup="true">Cart Reader</button>
+        <div id="app-menu" class="dropdown-menu" hidden>
+          <button id="menu-settings" type="button">Settings</button>
+          <label class="dropdown-menu-checkbox">
+            <input type="checkbox" id="menu-logs-checkbox" />
+            Logs
+          </label>
+          <button id="menu-exit" type="button">Exit</button>
+        </div>
+      </div>
+      <div class="titlebar-controls">
+        <button id="titlebar-minimize" class="titlebar-button" type="button" aria-label="Minimize">&#8211;</button>
+        <button id="titlebar-maximize" class="titlebar-button" type="button" aria-label="Maximize">&#9633;</button>
+        <button id="titlebar-close" class="titlebar-button titlebar-close" type="button" aria-label="Close">&#10005;</button>
+      </div>
+    </div>
+
     <header class="app-header">
-      <h1>Cart Reader</h1>
       <span id="reader-status" class="reader-status reader-status--disconnected">Reader: disconnected</span>
       <nav>
-        <button id="nav-gallery">Gallery</button>
-        <button id="nav-settings">Settings</button>
-        <button id="toggle-log">Logs</button>
+        <a href="#" id="nav-gallery" class="nav-link">Gallery</a>
+        <a href="#" id="nav-bindings" class="nav-link">Tag Bindings</a>
       </nav>
     </header>
 
@@ -25,21 +42,8 @@
       <div id="gallery-grid" class="gallery-grid"></div>
     </main>
 
-    <main id="view-settings" hidden>
-      <div id="settings-content"></div>
-
-      <section>
-        <h2>Tag bindings</h2>
-        <div id="bindings-list"></div>
-      </section>
-
-      <section class="dev-tools">
-        <h2>Dev: simulate tag insert</h2>
-        <form id="simulate-tag-form">
-          <input id="simulate-tag-input" placeholder="Tag UID, e.g. 04A3B2C1" />
-          <button type="submit">Trigger insert</button>
-        </form>
-      </section>
+    <main id="view-bindings" hidden>
+      <div id="bindings-list"></div>
     </main>
 
     <pre id="output-log" class="output-log" hidden></pre>
@@ -47,6 +51,34 @@
     <div id="game-context-menu" class="context-menu" hidden>
       <button id="context-menu-edit" type="button">Edit</button>
     </div>
+
+    <dialog id="settings-dialog">
+      <form method="dialog">
+        <h2>Settings</h2>
+        <div id="settings-content"></div>
+
+        <section>
+          <h3>When closing the window</h3>
+          <select id="close-behavior-select">
+            <option value="ask">Ask each time</option>
+            <option value="minimize">Always minimize to tray</option>
+            <option value="quit">Always quit</option>
+          </select>
+        </section>
+
+        <section class="dev-tools">
+          <h3>Dev: simulate tag insert</h3>
+          <div class="simulate-tag-row">
+            <input id="simulate-tag-input" placeholder="Tag UID, e.g. 04A3B2C1" />
+            <button id="simulate-tag-button" type="button">Trigger insert</button>
+          </div>
+        </section>
+
+        <menu>
+          <button type="submit">Close</button>
+        </menu>
+      </form>
+    </dialog>
 
     <dialog id="edit-game-dialog">
       <form method="dialog">
@@ -76,6 +108,21 @@
         <menu>
           <button id="scan-review-confirm" type="button">Add confirmed games</button>
           <button type="submit">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="close-prompt-dialog">
+      <form method="dialog">
+        <h2>Close Cart Reader?</h2>
+        <p>Keep watching the reader in the background, or quit completely?</p>
+        <label>
+          <input type="checkbox" id="close-prompt-remember" />
+          Remember my choice
+        </label>
+        <menu>
+          <button id="close-prompt-minimize" type="button">Minimize to tray</button>
+          <button id="close-prompt-quit" type="button">Quit</button>
         </menu>
       </form>
     </dialog>

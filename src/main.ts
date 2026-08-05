@@ -1,238 +1,335 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
-import type { Catalog, ScanCandidate } from "./types";
-import { renderGallery } from "./gallery/gallery";
-import { renderGameTagsList } from "./gallery/editGame";
-import { renderSettings } from "./settings/settings";
+import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
+import { open } from '@tauri-apps/plugin-dialog'
+import type { Catalog, ScanCandidate } from './types'
+import { renderGallery } from './gallery/gallery'
+import { renderGameTagsList } from './gallery/editGame'
+import { renderSettings } from './settings/settings'
 import {
   renderScanReview,
   collectConfirmedGames,
   renderBindDialog,
   renderBindingsList,
-} from "./binding/binding";
-import { appendLog } from "./log/log";
+} from './binding/binding'
+import { appendLog } from './log/log'
 
-let catalog: Catalog;
+let catalog: Catalog
 
-const galleryEl = document.querySelector<HTMLElement>("#gallery-grid")!;
-const settingsEl = document.querySelector<HTMLElement>("#settings-content")!;
-const bindingsListEl = document.querySelector<HTMLElement>("#bindings-list")!;
-const outputLogEl = document.querySelector<HTMLElement>("#output-log")!;
-const viewGallery = document.querySelector<HTMLElement>("#view-gallery")!;
-const viewSettings = document.querySelector<HTMLElement>("#view-settings")!;
-const navGallery = document.querySelector<HTMLButtonElement>("#nav-gallery")!;
-const navSettings = document.querySelector<HTMLButtonElement>("#nav-settings")!;
-const toggleLogBtn = document.querySelector<HTMLButtonElement>("#toggle-log")!;
+const galleryEl = document.querySelector<HTMLElement>('#gallery-grid')!
+const settingsEl = document.querySelector<HTMLElement>('#settings-content')!
+const bindingsListEl = document.querySelector<HTMLElement>('#bindings-list')!
+const outputLogEl = document.querySelector<HTMLElement>('#output-log')!
+const viewGallery = document.querySelector<HTMLElement>('#view-gallery')!
+const viewBindings = document.querySelector<HTMLElement>('#view-bindings')!
+const navGallery = document.querySelector<HTMLAnchorElement>('#nav-gallery')!
+const navBindings = document.querySelector<HTMLAnchorElement>('#nav-bindings')!
+const alertBanner = document.querySelector<HTMLElement>('#alert-banner')!
+const readerStatusEl = document.querySelector<HTMLElement>('#reader-status')!
 
-const scanReviewDialog = document.querySelector<HTMLDialogElement>("#scan-review-dialog")!;
-const scanReviewList = document.querySelector<HTMLElement>("#scan-review-list")!;
-const scanReviewConfirmBtn = document.querySelector<HTMLButtonElement>("#scan-review-confirm")!;
-let scanReviewFolderPath = "";
+const appMenuToggle =
+  document.querySelector<HTMLButtonElement>('#app-menu-toggle')!
+const appMenuEl = document.querySelector<HTMLElement>('#app-menu')!
+const menuSettingsBtn =
+  document.querySelector<HTMLButtonElement>('#menu-settings')!
+const menuLogsCheckbox = document.querySelector<HTMLInputElement>(
+  '#menu-logs-checkbox',
+)!
+const menuExitBtn = document.querySelector<HTMLButtonElement>('#menu-exit')!
 
-const bindDialog = document.querySelector<HTMLDialogElement>("#bind-dialog")!;
-const bindTagLabel = document.querySelector<HTMLElement>("#bind-tag-uid")!;
-const bindSelect = document.querySelector<HTMLSelectElement>("#bind-game-select")!;
-const bindConfirmBtn = document.querySelector<HTMLButtonElement>("#bind-confirm")!;
-let bindTagUid = "";
+const titlebarMinimizeBtn =
+  document.querySelector<HTMLButtonElement>('#titlebar-minimize')!
+const titlebarMaximizeBtn =
+  document.querySelector<HTMLButtonElement>('#titlebar-maximize')!
+const titlebarCloseBtn =
+  document.querySelector<HTMLButtonElement>('#titlebar-close')!
+const appWindow = getCurrentWindow()
 
-const simulateForm = document.querySelector<HTMLFormElement>("#simulate-tag-form")!;
-const simulateInput = document.querySelector<HTMLInputElement>("#simulate-tag-input")!;
-const alertBanner = document.querySelector<HTMLElement>("#alert-banner")!;
-const readerStatusEl = document.querySelector<HTMLElement>("#reader-status")!;
+const settingsDialog =
+  document.querySelector<HTMLDialogElement>('#settings-dialog')!
+const closeBehaviorSelect = document.querySelector<HTMLSelectElement>(
+  '#close-behavior-select',
+)!
+const simulateInput = document.querySelector<HTMLInputElement>(
+  '#simulate-tag-input',
+)!
+const simulateBtn = document.querySelector<HTMLButtonElement>(
+  '#simulate-tag-button',
+)!
 
-const contextMenuEl = document.querySelector<HTMLElement>("#game-context-menu")!;
-const contextMenuEditBtn = document.querySelector<HTMLButtonElement>("#context-menu-edit")!;
-let contextMenuGameId = "";
+const scanReviewDialog = document.querySelector<HTMLDialogElement>(
+  '#scan-review-dialog',
+)!
+const scanReviewList = document.querySelector<HTMLElement>('#scan-review-list')!
+const scanReviewConfirmBtn = document.querySelector<HTMLButtonElement>(
+  '#scan-review-confirm',
+)!
+let scanReviewFolderPath = ''
 
-const editGameDialog = document.querySelector<HTMLDialogElement>("#edit-game-dialog")!;
-const editGameNameInput = document.querySelector<HTMLInputElement>("#edit-game-name")!;
-const editGameSaveNameBtn = document.querySelector<HTMLButtonElement>("#edit-game-save-name")!;
-const editGameChangeArtBtn = document.querySelector<HTMLButtonElement>("#edit-game-change-art")!;
-const editGameTagsListEl = document.querySelector<HTMLElement>("#edit-game-tags-list")!;
-let editGameId = "";
+const bindDialog = document.querySelector<HTMLDialogElement>('#bind-dialog')!
+const bindTagLabel = document.querySelector<HTMLElement>('#bind-tag-uid')!
+const bindSelect =
+  document.querySelector<HTMLSelectElement>('#bind-game-select')!
+const bindConfirmBtn =
+  document.querySelector<HTMLButtonElement>('#bind-confirm')!
+let bindTagUid = ''
+
+const contextMenuEl = document.querySelector<HTMLElement>('#game-context-menu')!
+const contextMenuEditBtn =
+  document.querySelector<HTMLButtonElement>('#context-menu-edit')!
+let contextMenuGameId = ''
+
+const editGameDialog =
+  document.querySelector<HTMLDialogElement>('#edit-game-dialog')!
+const editGameNameInput =
+  document.querySelector<HTMLInputElement>('#edit-game-name')!
+const editGameSaveNameBtn = document.querySelector<HTMLButtonElement>(
+  '#edit-game-save-name',
+)!
+const editGameChangeArtBtn = document.querySelector<HTMLButtonElement>(
+  '#edit-game-change-art',
+)!
+const editGameTagsListEl = document.querySelector<HTMLElement>(
+  '#edit-game-tags-list',
+)!
+let editGameId = ''
+
+const closePromptDialog = document.querySelector<HTMLDialogElement>(
+  '#close-prompt-dialog',
+)!
+const closePromptRemember = document.querySelector<HTMLInputElement>(
+  '#close-prompt-remember',
+)!
+const closePromptMinimizeBtn = document.querySelector<HTMLButtonElement>(
+  '#close-prompt-minimize',
+)!
+const closePromptQuitBtn =
+  document.querySelector<HTMLButtonElement>('#close-prompt-quit')!
 
 const READER_STATUS_LABEL: Record<string, string> = {
-  disconnected: "Reader: disconnected",
-  connectedUnknownFirmware: "Reader: connected, needs firmware update",
-  connectedReady: "Reader: ready",
-};
+  disconnected: 'Reader: disconnected',
+  connectedUnknownFirmware: 'Reader: connected, needs firmware update',
+  connectedReady: 'Reader: ready',
+}
 
 function updateReaderStatus(state: string): void {
-  readerStatusEl.textContent = READER_STATUS_LABEL[state] ?? `Reader: ${state}`;
-  readerStatusEl.className = `reader-status reader-status--${state}`;
+  readerStatusEl.textContent = READER_STATUS_LABEL[state] ?? `Reader: ${state}`
+  readerStatusEl.className = `reader-status reader-status--${state}`
 }
 
 function showAlert(message: string): void {
-  alertBanner.textContent = message;
-  alertBanner.hidden = false;
+  alertBanner.textContent = message
+  alertBanner.hidden = false
 }
 
 function log(message: string): void {
-  appendLog(outputLogEl, message);
+  appendLog(outputLogEl, message)
 }
 
 /** Every Tauri command can reject (bad path, disk full, permission denied)
  * — routing all of them through here means a backend error always reaches
  * the user instead of dying as a silent unhandled rejection. */
-async function invokeOrAlert<T>(command: string, args?: Record<string, unknown>): Promise<T | undefined> {
+async function invokeOrAlert<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T | undefined> {
   try {
-    return await invoke<T>(command, args);
+    return await invoke<T>(command, args)
   } catch (e) {
-    showAlert(`${command} failed: ${e}`);
-    return undefined;
+    showAlert(`${command} failed: ${e}`)
+    return undefined
   }
 }
 
-function showView(name: "gallery" | "settings"): void {
-  viewGallery.hidden = name !== "gallery";
-  viewSettings.hidden = name !== "settings";
+function showView(name: 'gallery' | 'bindings'): void {
+  viewGallery.hidden = name !== 'gallery'
+  viewBindings.hidden = name !== 'bindings'
+  navGallery.classList.toggle('active', name === 'gallery')
+  navBindings.classList.toggle('active', name === 'bindings')
 }
 
 function refresh(): void {
-  renderGallery(galleryEl, catalog.games, { onContextMenu: showContextMenu });
+  renderGallery(galleryEl, catalog.games, { onContextMenu: showContextMenu })
   renderSettings(settingsEl, catalog.settings, {
     onAddFolder: handleAddFolder,
     onRemoveFolder: handleRemoveFolder,
     onToggleConfirmBeforeLaunch: handleToggleConfirmBeforeLaunch,
     onRefreshArtwork: handleRefreshArtwork,
-  });
-  renderBindingsList(bindingsListEl, catalog.bindings, catalog.games, handleUnbindTag);
-  outputLogEl.hidden = !catalog.settings.showOutputLog;
+  })
+  renderBindingsList(
+    bindingsListEl,
+    catalog.bindings,
+    catalog.games,
+    handleUnbindTag,
+  )
+  outputLogEl.hidden = !catalog.settings.showOutputLog
+  menuLogsCheckbox.checked = catalog.settings.showOutputLog
+  closeBehaviorSelect.value = catalog.settings.closeBehavior
+}
+
+async function updateSettings(
+  overrides: Partial<{
+    rootFolders: string[]
+    confirmBeforeLaunch: boolean
+    showOutputLog: boolean
+    closeBehavior: 'ask' | 'minimize' | 'quit'
+  }>,
+): Promise<void> {
+  const result = await invokeOrAlert<Catalog>('update_settings', {
+    rootFolders: catalog.settings.rootFolders,
+    confirmBeforeLaunch: catalog.settings.confirmBeforeLaunch,
+    showOutputLog: catalog.settings.showOutputLog,
+    closeBehavior: catalog.settings.closeBehavior,
+    ...overrides,
+  })
+  if (!result) return
+  catalog = result
+  refresh()
 }
 
 async function handleUnbindTag(tagUid: string): Promise<void> {
-  const result = await invokeOrAlert<Catalog>("unbind_tag", { tagUid });
-  if (!result) return;
-  catalog = result;
-  refresh();
-  log(`Unbound tag ${tagUid}`);
+  const result = await invokeOrAlert<Catalog>('unbind_tag', { tagUid })
+  if (!result) return
+  catalog = result
+  refresh()
+  log(`Unbound tag ${tagUid}`)
 }
 
 async function loadCatalog(): Promise<void> {
-  const result = await invokeOrAlert<Catalog>("get_catalog");
-  if (!result) return;
-  catalog = result;
-  refresh();
+  const result = await invokeOrAlert<Catalog>('get_catalog')
+  if (!result) return
+  catalog = result
+  refresh()
 }
 
 async function loadReaderState(): Promise<void> {
-  const state = await invokeOrAlert<string>("get_reader_state");
-  if (state) updateReaderStatus(state);
+  const state = await invokeOrAlert<string>('get_reader_state')
+  if (state) updateReaderStatus(state)
 }
 
 async function handleAddFolder(path: string): Promise<void> {
-  const candidates = await invokeOrAlert<ScanCandidate[]>("scan_folder", { path });
-  if (!candidates) return;
-  scanReviewFolderPath = path;
-  renderScanReview(scanReviewList, candidates);
-  scanReviewDialog.showModal();
+  const candidates = await invokeOrAlert<ScanCandidate[]>('scan_folder', {
+    path,
+  })
+  if (!candidates) return
+  scanReviewFolderPath = path
+  renderScanReview(scanReviewList, candidates)
+  scanReviewDialog.showModal()
 }
 
 async function handleRefreshArtwork(): Promise<void> {
-  showAlert("Refreshing artwork...");
-  const result = await invokeOrAlert<Catalog>("refresh_all_artwork");
-  if (!result) return;
-  catalog = result;
-  refresh();
-  showAlert("Artwork refreshed.");
+  showAlert('Refreshing artwork...')
+  const result = await invokeOrAlert<Catalog>('refresh_all_artwork')
+  if (!result) return
+  catalog = result
+  refresh()
+  showAlert('Artwork refreshed.')
 }
 
 async function handleRemoveFolder(path: string): Promise<void> {
-  const result = await invokeOrAlert<Catalog>("remove_root_folder", { path });
-  if (!result) return;
-  catalog = result;
-  refresh();
+  const result = await invokeOrAlert<Catalog>('remove_root_folder', { path })
+  if (!result) return
+  catalog = result
+  refresh()
 }
 
 async function handleToggleConfirmBeforeLaunch(value: boolean): Promise<void> {
-  const result = await invokeOrAlert<Catalog>("update_settings", {
-    rootFolders: catalog.settings.rootFolders,
-    confirmBeforeLaunch: value,
-    showOutputLog: catalog.settings.showOutputLog,
-  });
-  if (!result) return;
-  catalog = result;
-  refresh();
+  await updateSettings({ confirmBeforeLaunch: value })
 }
 
 async function handleToggleShowOutputLog(value: boolean): Promise<void> {
-  const result = await invokeOrAlert<Catalog>("update_settings", {
-    rootFolders: catalog.settings.rootFolders,
-    confirmBeforeLaunch: catalog.settings.confirmBeforeLaunch,
-    showOutputLog: value,
-  });
-  if (!result) return;
-  catalog = result;
-  refresh();
+  await updateSettings({ showOutputLog: value })
+}
+
+async function handleChangeCloseBehavior(
+  value: 'ask' | 'minimize' | 'quit',
+): Promise<void> {
+  await updateSettings({ closeBehavior: value })
 }
 
 function openBindDialog(tagUid: string): void {
-  bindTagUid = tagUid;
-  bindTagLabel.textContent = tagUid;
-  renderBindDialog(bindSelect, catalog.games);
-  bindDialog.showModal();
+  bindTagUid = tagUid
+  bindTagLabel.textContent = tagUid
+  renderBindDialog(bindSelect, catalog.games)
+  bindDialog.showModal()
 }
 
 function showContextMenu(event: MouseEvent, gameId: string): void {
-  contextMenuGameId = gameId;
-  contextMenuEl.style.left = `${event.clientX}px`;
-  contextMenuEl.style.top = `${event.clientY}px`;
-  contextMenuEl.hidden = false;
+  contextMenuGameId = gameId
+  contextMenuEl.style.left = `${event.clientX}px`
+  contextMenuEl.style.top = `${event.clientY}px`
+  contextMenuEl.hidden = false
 }
 
 function hideContextMenu(): void {
-  contextMenuEl.hidden = true;
+  contextMenuEl.hidden = true
+}
+
+function hideAppMenu(): void {
+  appMenuEl.hidden = true
 }
 
 function refreshEditGameTagsList(): void {
-  renderGameTagsList(editGameTagsListEl, editGameId, catalog.bindings, handleUnbindFromEditDialog);
+  renderGameTagsList(
+    editGameTagsListEl,
+    editGameId,
+    catalog.bindings,
+    handleUnbindFromEditDialog,
+  )
 }
 
 function openEditDialog(gameId: string): void {
-  const game = catalog.games.find((g) => g.id === gameId);
-  if (!game) return;
-  editGameId = gameId;
-  editGameNameInput.value = game.name;
-  refreshEditGameTagsList();
-  editGameDialog.showModal();
+  const game = catalog.games.find((g) => g.id === gameId)
+  if (!game) return
+  editGameId = gameId
+  editGameNameInput.value = game.name
+  refreshEditGameTagsList()
+  editGameDialog.showModal()
 }
 
 async function handleSaveGameName(): Promise<void> {
-  const name = editGameNameInput.value.trim();
-  if (!name) return;
-  const result = await invokeOrAlert<Catalog>("rename_game", { gameId: editGameId, name });
-  if (!result) return;
-  catalog = result;
-  refresh();
-  showAlert(`Renamed to "${name}".`);
-  log(`Renamed game ${editGameId} -> "${name}"`);
+  const name = editGameNameInput.value.trim()
+  if (!name) return
+  const result = await invokeOrAlert<Catalog>('rename_game', {
+    gameId: editGameId,
+    name,
+  })
+  if (!result) return
+  catalog = result
+  refresh()
+  showAlert(`Renamed to "${name}".`)
+  log(`Renamed game ${editGameId} -> "${name}"`)
 }
 
 async function handleChangeGameArt(): Promise<void> {
   const selected = await open({
-    filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "bmp", "webp", "ico"] }],
-  });
-  if (typeof selected !== "string") return;
+    filters: [
+      {
+        name: 'Images',
+        extensions: ['png', 'jpg', 'jpeg', 'bmp', 'webp', 'ico'],
+      },
+    ],
+  })
+  if (typeof selected !== 'string') return
 
-  const result = await invokeOrAlert<Catalog>("set_custom_artwork", {
+  const result = await invokeOrAlert<Catalog>('set_custom_artwork', {
     gameId: editGameId,
     sourcePath: selected,
-  });
-  if (!result) return;
-  catalog = result;
-  refresh();
-  const game = catalog.games.find((g) => g.id === editGameId);
-  log(`Set custom artwork for "${game?.name ?? editGameId}"`);
+  })
+  if (!result) return
+  catalog = result
+  refresh()
+  const game = catalog.games.find((g) => g.id === editGameId)
+  log(`Set custom artwork for "${game?.name ?? editGameId}"`)
 }
 
 async function handleUnbindFromEditDialog(tagUid: string): Promise<void> {
-  const result = await invokeOrAlert<Catalog>("unbind_tag", { tagUid });
-  if (!result) return;
-  catalog = result;
-  refresh();
-  refreshEditGameTagsList();
-  log(`Unbound tag ${tagUid}`);
+  const result = await invokeOrAlert<Catalog>('unbind_tag', { tagUid })
+  if (!result) return
+  catalog = result
+  refresh()
+  refreshEditGameTagsList()
+  log(`Unbound tag ${tagUid}`)
 }
 
 // A tag held too close to the reader can make it flap inserted/removed
@@ -240,129 +337,220 @@ async function handleUnbindFromEditDialog(tagUid: string): Promise<void> {
 // this, but this is a second, independent line of defense so a repeat
 // insert of the same tag can never fire a fresh launch/dialog-open faster
 // than this).
-const RECENT_TAG_EVENT_COOLDOWN_MS = 3000;
-const lastHandledTagEventAt = new Map<string, number>();
+const RECENT_TAG_EVENT_COOLDOWN_MS = 3000
+const lastHandledTagEventAt = new Map<string, number>()
 
 /** Looks up a tag UID against the catalog and reacts: alerts on an
  * unavailable game, opens the bind dialog for an unbound tag, or launches
  * the bound game (with a confirm prompt first if settings.confirmBeforeLaunch
  * is on). Shared by both the real serial "tag-inserted" event and the dev
- * simulate-insert form below. */
+ * simulate-insert control below. */
 async function handleTagEvent(tagUid: string): Promise<void> {
-  if (!catalog) return; // a real insert can in principle race the initial catalog load
+  if (!catalog) return // a real insert can in principle race the initial catalog load
 
-  const now = Date.now();
-  const lastHandledAt = lastHandledTagEventAt.get(tagUid);
-  if (lastHandledAt !== undefined && now - lastHandledAt < RECENT_TAG_EVENT_COOLDOWN_MS) {
-    return;
+  const now = Date.now()
+  const lastHandledAt = lastHandledTagEventAt.get(tagUid)
+  if (
+    lastHandledAt !== undefined &&
+    now - lastHandledAt < RECENT_TAG_EVENT_COOLDOWN_MS
+  ) {
+    return
   }
-  lastHandledTagEventAt.set(tagUid, now);
+  lastHandledTagEventAt.set(tagUid, now)
 
-  log(`Tag inserted: ${tagUid}`);
+  log(`Tag inserted: ${tagUid}`)
 
-  const binding = catalog.bindings.find((b) => b.tagUid === tagUid);
+  const binding = catalog.bindings.find((b) => b.tagUid === tagUid)
   if (!binding) {
-    log(`Tag ${tagUid} is not bound to a game — opening bind dialog`);
-    openBindDialog(tagUid);
-    return;
+    log(`Tag ${tagUid} is not bound to a game — opening bind dialog`)
+    openBindDialog(tagUid)
+    return
   }
 
-  const game = catalog.games.find((g) => g.id === binding.gameId);
+  const game = catalog.games.find((g) => g.id === binding.gameId)
   if (!game) {
-    showAlert(`Tag ${tagUid} is bound to a game that's no longer in the catalog.`);
-    log(`Tag ${tagUid} is bound to a game that's no longer in the catalog`);
-    return;
+    showAlert(
+      `Tag ${tagUid} is bound to a game that's no longer in the catalog.`,
+    )
+    log(`Tag ${tagUid} is bound to a game that's no longer in the catalog`)
+    return
   }
   if (!game.available) {
-    showAlert(`"${game.name}" is bound to this tag but isn't installed/found right now.`);
-    log(`"${game.name}" is unavailable, not launching`);
-    return;
+    showAlert(
+      `"${game.name}" is bound to this tag but isn't installed/found right now.`,
+    )
+    log(`"${game.name}" is unavailable, not launching`)
+    return
   }
 
-  if (catalog.settings.confirmBeforeLaunch && !window.confirm(`Launch "${game.name}"?`)) {
-    log(`Launch of "${game.name}" cancelled at confirm prompt`);
-    return;
+  if (
+    catalog.settings.confirmBeforeLaunch &&
+    !window.confirm(`Launch "${game.name}"?`)
+  ) {
+    log(`Launch of "${game.name}" cancelled at confirm prompt`)
+    return
   }
 
   try {
-    const launched = await invoke<boolean>("launch_game", {
+    const launched = await invoke<boolean>('launch_game', {
       exePath: game.exePath,
       folderPath: game.folderPath,
-    });
+    })
     if (launched) {
-      showAlert(`Launched "${game.name}".`);
-      log(`Launched "${game.name}"`);
+      showAlert(`Launched "${game.name}".`)
+      log(`Launched "${game.name}"`)
     } else {
-      showAlert(`"${game.name}" is already running.`);
-      log(`"${game.name}" is already running, not relaunching`);
+      showAlert(`"${game.name}" is already running.`)
+      log(`"${game.name}" is already running, not relaunching`)
     }
   } catch (e) {
-    showAlert(`Couldn't launch "${game.name}": ${e}`);
-    log(`Failed to launch "${game.name}": ${e}`);
+    showAlert(`Couldn't launch "${game.name}": ${e}`)
+    log(`Failed to launch "${game.name}": ${e}`)
   }
 }
 
-scanReviewConfirmBtn.addEventListener("click", async () => {
-  const games = collectConfirmedGames(scanReviewList);
-  if (!(await invokeOrAlert<Catalog>("confirm_games", { games }))) return;
-  const result = await invokeOrAlert<Catalog>("add_root_folder", { path: scanReviewFolderPath });
-  if (!result) return;
-  catalog = result;
-  scanReviewDialog.close();
-  refresh();
-});
-
-bindConfirmBtn.addEventListener("click", async () => {
-  const gameId = bindSelect.value;
-  if (!gameId) return;
-  const result = await invokeOrAlert<Catalog>("bind_tag", { tagUid: bindTagUid, gameId });
-  if (!result) return;
-  catalog = result;
-  bindDialog.close();
-  refresh();
-  showAlert(`Bound tag ${bindTagUid}.`);
-  log(`Bound tag ${bindTagUid} -> ${bindSelect.selectedOptions[0]?.textContent ?? gameId}`);
-});
-
-simulateForm.addEventListener("submit", (e) => {
-  e.preventDefault();
-  const uid = simulateInput.value.trim();
+function triggerSimulatedTagEvent(): void {
+  const uid = simulateInput.value.trim()
   if (uid) {
-    handleTagEvent(uid);
-    simulateInput.value = "";
+    handleTagEvent(uid)
+    simulateInput.value = ''
   }
-});
+}
 
-contextMenuEditBtn.addEventListener("click", () => {
-  hideContextMenu();
-  openEditDialog(contextMenuGameId);
-});
-document.addEventListener("click", (e) => {
+scanReviewConfirmBtn.addEventListener('click', async () => {
+  const games = collectConfirmedGames(scanReviewList)
+  if (!(await invokeOrAlert<Catalog>('confirm_games', { games }))) return
+  const result = await invokeOrAlert<Catalog>('add_root_folder', {
+    path: scanReviewFolderPath,
+  })
+  if (!result) return
+  catalog = result
+  scanReviewDialog.close()
+  refresh()
+})
+
+bindConfirmBtn.addEventListener('click', async () => {
+  const gameId = bindSelect.value
+  if (!gameId) return
+  const result = await invokeOrAlert<Catalog>('bind_tag', {
+    tagUid: bindTagUid,
+    gameId,
+  })
+  if (!result) return
+  catalog = result
+  bindDialog.close()
+  refresh()
+  showAlert(`Bound tag ${bindTagUid}.`)
+  log(
+    `Bound tag ${bindTagUid} -> ${bindSelect.selectedOptions[0]?.textContent ?? gameId}`,
+  )
+})
+
+simulateBtn.addEventListener('click', triggerSimulatedTagEvent)
+simulateInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault()
+    triggerSimulatedTagEvent()
+  }
+})
+
+contextMenuEditBtn.addEventListener('click', () => {
+  hideContextMenu()
+  openEditDialog(contextMenuGameId)
+})
+
+editGameSaveNameBtn.addEventListener('click', handleSaveGameName)
+editGameChangeArtBtn.addEventListener('click', handleChangeGameArt)
+
+navGallery.addEventListener('click', (e) => {
+  e.preventDefault()
+  showView('gallery')
+})
+navBindings.addEventListener('click', (e) => {
+  e.preventDefault()
+  showView('bindings')
+})
+
+appMenuToggle.addEventListener('click', () => {
+  appMenuEl.hidden = !appMenuEl.hidden
+})
+menuSettingsBtn.addEventListener('click', () => {
+  hideAppMenu()
+  settingsDialog.showModal()
+})
+menuLogsCheckbox.addEventListener('change', () =>
+  handleToggleShowOutputLog(menuLogsCheckbox.checked),
+)
+menuExitBtn.addEventListener('click', () => {
+  hideAppMenu()
+  invokeOrAlert('resolve_close_prompt', { minimize: false, remember: false })
+})
+closeBehaviorSelect.addEventListener('change', () =>
+  handleChangeCloseBehavior(
+    closeBehaviorSelect.value as 'ask' | 'minimize' | 'quit',
+  ),
+)
+
+// appWindow.minimize() corrupts the window on Windows when decorations are
+// disabled (native minimize animation needs window chrome that doesn't
+// exist here) -- hide() to the tray instead, reusing the same path the
+// close-to-tray flow already relies on.
+titlebarMinimizeBtn.addEventListener('click', () => {
+  appWindow.minimize()
+})
+titlebarMaximizeBtn.addEventListener('click', () => {
+  appWindow.toggleMaximize()
+})
+// close() emits closeRequested, which the Rust side already intercepts for
+// the minimize-to-tray prompt -- same path as the OS close button used to
+// take before decorations were disabled for the custom titlebar.
+titlebarCloseBtn.addEventListener('click', () => {
+  appWindow.close()
+})
+
+document.addEventListener('click', (e) => {
   if (!contextMenuEl.hidden && !contextMenuEl.contains(e.target as Node)) {
-    hideContextMenu();
+    hideContextMenu()
   }
-});
+  if (
+    !appMenuEl.hidden &&
+    !appMenuEl.contains(e.target as Node) &&
+    e.target !== appMenuToggle
+  ) {
+    hideAppMenu()
+  }
+})
 
-editGameSaveNameBtn.addEventListener("click", handleSaveGameName);
-editGameChangeArtBtn.addEventListener("click", handleChangeGameArt);
+listen<string>('reader-state', (event) => {
+  updateReaderStatus(event.payload)
+  log(`Reader state: ${event.payload}`)
+})
+listen<string>('tag-inserted', (event) => handleTagEvent(event.payload))
+listen<string>('tag-removed', (event) => log(`Tag removed: ${event.payload}`))
+listen<string>('reader-error', (event) => {
+  showAlert(`Reader: ${event.payload}`)
+  log(`Reader error: ${event.payload}`)
+})
+listen('close-requested', () => closePromptDialog.showModal())
 
-navGallery.addEventListener("click", () => showView("gallery"));
-navSettings.addEventListener("click", () => showView("settings"));
-toggleLogBtn.addEventListener("click", () => handleToggleShowOutputLog(!catalog.settings.showOutputLog));
+// Escape fires the dialog's native 'cancel' event, which would dismiss it
+// without ever calling resolve_close_prompt -- the window's close request
+// is still pending on the Rust side at that point, so the prompt has to
+// resolve to an actual choice rather than being silently dismissable.
+closePromptDialog.addEventListener('cancel', (e) => e.preventDefault())
 
-listen<string>("reader-state", (event) => {
-  updateReaderStatus(event.payload);
-  log(`Reader state: ${event.payload}`);
-});
-listen<string>("tag-inserted", (event) => handleTagEvent(event.payload));
-listen<string>("tag-removed", (event) => log(`Tag removed: ${event.payload}`));
-listen<string>("reader-error", (event) => {
-  showAlert(`Reader: ${event.payload}`);
-  log(`Reader error: ${event.payload}`);
-});
+async function resolveClosePrompt(minimize: boolean): Promise<void> {
+  await invokeOrAlert('resolve_close_prompt', {
+    minimize,
+    remember: closePromptRemember.checked,
+  })
+  closePromptDialog.close()
+}
+closePromptMinimizeBtn.addEventListener('click', () => resolveClosePrompt(true))
+closePromptQuitBtn.addEventListener('click', () => resolveClosePrompt(false))
 
-window.addEventListener("DOMContentLoaded", () => {
-  showView("gallery");
-  loadCatalog();
-  loadReaderState();
-});
+window.addEventListener('DOMContentLoaded', () => {
+  showView('gallery')
+  loadCatalog()
+  loadReaderState()
+})

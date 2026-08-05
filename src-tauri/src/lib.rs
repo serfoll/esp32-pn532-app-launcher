@@ -6,7 +6,16 @@ pub mod serial;
 
 use serial::{ReaderState, WatchdogEvent};
 use std::sync::Mutex;
-use tauri::{Emitter, Manager};
+use tauri::menu::MenuBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+
+fn show_and_focus_main(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -37,6 +46,7 @@ pub fn run() {
             commands::update_settings,
             commands::launch_game,
             commands::get_reader_state,
+            commands::resolve_close_prompt,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -58,7 +68,68 @@ pub fn run() {
                     WatchdogEvent::Tag(_) => {}
                 });
             });
+
+            // System tray: the app's whole point is watching the reader in
+            // the background, so closing the window shouldn't necessarily
+            // quit it -- but hiding the window with no way back except Task
+            // Manager would be worse. The tray icon is that way back.
+            let tray_menu = MenuBuilder::new(app)
+                .text("tray-show", "Show")
+                .text("tray-quit", "Quit")
+                .build()?;
+            let icon = app
+                .default_window_icon()
+                .cloned()
+                .ok_or("no default window icon configured")?;
+            TrayIconBuilder::new()
+                .icon(icon)
+                .tooltip("Cart Reader")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "tray-show" => show_and_focus_main(app),
+                    "tray-quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Down,
+                        ..
+                    } = event
+                    {
+                        show_and_focus_main(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            let WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+
+            let app = window.app_handle();
+            let close_behavior = commands::load_catalog(app)
+                .map(|c| c.settings.close_behavior)
+                .unwrap_or_default();
+
+            match close_behavior {
+                // Decided: minimize to tray -- keep watching the reader.
+                catalog::CloseBehavior::Minimize => {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                // Decided: quit -- let the close proceed normally.
+                catalog::CloseBehavior::Quit => {}
+                // Not decided yet: hold the close and let the frontend ask,
+                // via resolve_close_prompt once the user answers.
+                catalog::CloseBehavior::Ask => {
+                    api.prevent_close();
+                    let _ = app.emit("close-requested", ());
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,6 +2,7 @@ export interface Settings {
   rootFolders: string[];
   confirmBeforeLaunch: boolean;
   showOutputLog: boolean;
+  closeBehavior: "ask" | "minimize" | "quit";
 }
 
 export interface Game {
