@@ -105,7 +105,6 @@ pub fn remove_root_folder(app: AppHandle, path: String) -> Result<Catalog, Strin
     let mut catalog = load_catalog(&app)?;
     catalog.settings.root_folders.retain(|p| p != &path);
     catalog::rescan_availability(&mut catalog);
-    catalog::mark_unavailable_under(&mut catalog, &path);
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }

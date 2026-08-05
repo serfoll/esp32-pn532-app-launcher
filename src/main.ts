@@ -118,6 +118,11 @@ const progressDialog = document.querySelector<HTMLDialogElement>(
 const progressDialogMessageEl = document.querySelector<HTMLElement>(
   '#progress-dialog-message',
 )!
+// No close button (nothing to cancel -- the underlying command has no
+// abort mechanism and keeps running either way) means Escape shouldn't be
+// able to dismiss it either; a <dialog> still fires 'cancel' on Escape
+// even with no close button in its markup.
+progressDialog.addEventListener('cancel', (e) => e.preventDefault())
 const launchErrorDialog = document.querySelector<HTMLDialogElement>(
   '#launch-error-dialog',
 )!

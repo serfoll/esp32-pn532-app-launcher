@@ -152,31 +152,35 @@ pub fn save(path: &Path, catalog: &Catalog) -> io::Result<()> {
     Ok(())
 }
 
-/// Marks games whose exePath no longer exists on disk as unavailable (and
-/// ones that reappeared as available again). Never adds, removes, or
+/// Marks a game unavailable unless its exe still exists on disk *and* its
+/// folder still falls under one of the currently-tracked root folders (and
+/// marks it available again once both hold). Never adds, removes, or
 /// otherwise touches `games` identity or `bindings` — availability is the
 /// only thing a rescan is allowed to change.
+///
+/// The root-folder half matters because removing a root folder from
+/// Settings doesn't delete anything on disk -- the exe can still
+/// physically exist, so an exe-existence check alone never notices the
+/// removal, and the game keeps looking like an active part of the library
+/// on every subsequent catalog load (get_catalog calls this on every app
+/// launch and refresh). Every legitimately-cataloged game's folder is
+/// already a subfolder of the root it was scanned from, so this can't
+/// false-negative a game that's still genuinely part of the library.
 pub fn rescan_availability(catalog: &mut Catalog) {
-    for game in &mut catalog.games {
-        game.available = Path::new(&game.exe_path).exists();
-    }
-}
+    let root_folders: Vec<String> = catalog
+        .settings
+        .root_folders
+        .iter()
+        .map(|p| p.to_lowercase())
+        .collect();
 
-/// Marks every game whose folder lives under `removed_root` as
-/// unavailable. Used right after a root folder is removed from Settings --
-/// its games' exe files can still physically exist on disk (the folder
-/// itself wasn't deleted, just untracked), so `rescan_availability` alone
-/// wouldn't notice anything changed and the gallery would keep showing
-/// them as if they were still part of the library. Doesn't touch `games`
-/// or `bindings` themselves -- custom artwork and tag bindings survive in
-/// case the same folder gets re-added later, matching
-/// `remove_root_folder`'s existing never-silently-delete rule.
-pub fn mark_unavailable_under(catalog: &mut Catalog, removed_root: &str) {
-    let target = Path::new(&removed_root.to_lowercase()).to_path_buf();
     for game in &mut catalog.games {
-        if Path::new(&game.folder_path.to_lowercase()).starts_with(&target) {
-            game.available = false;
-        }
+        let exe_exists = Path::new(&game.exe_path).exists();
+        let folder_lower = game.folder_path.to_lowercase();
+        let under_tracked_root = root_folders
+            .iter()
+            .any(|root| Path::new(&folder_lower).starts_with(Path::new(root)));
+        game.available = exe_exists && under_tracked_root;
     }
 }
 
@@ -367,26 +371,46 @@ mod tests {
     }
 
     #[test]
-    fn mark_unavailable_under_marks_only_games_under_the_removed_root() {
+    fn rescan_availability_marks_a_game_unavailable_once_its_root_is_untracked() {
+        // The exe genuinely still exists on disk -- removing a root folder
+        // never deletes anything -- so an exe-existence check alone would
+        // never notice this game's root was untracked. This is the exact
+        // bug: without the root-folder half of the check, a removed
+        // folder's games kept showing as available on every subsequent
+        // catalog load.
+        let exe_path = temp_path("rescan_untracked_root").with_extension("exe");
+        fs::write(&exe_path, b"").unwrap();
+
+        let mut game = sample_game(exe_path.to_str().unwrap());
+        game.folder_path = exe_path.parent().unwrap().to_str().unwrap().to_string();
         let mut catalog = Catalog::default();
+        catalog.games.push(game);
+        // root_folders left empty: this game's folder isn't tracked by any
+        // currently-configured root, same as right after its one root
+        // folder was removed from Settings.
 
-        let mut removed = sample_game("C:\\Games\\SomeGame\\Game.exe");
-        removed.folder_path = "C:\\Games\\SomeGame".into();
-        removed.id = "removed".into();
+        rescan_availability(&mut catalog);
+        fs::remove_file(&exe_path).ok();
 
-        let mut kept = sample_game("D:\\Other\\OtherGame\\Game.exe");
-        kept.folder_path = "D:\\Other\\OtherGame".into();
-        kept.id = "kept".into();
+        assert!(!catalog.games[0].available, "exe exists, but its folder isn't under any tracked root");
+    }
 
-        catalog.games.push(removed);
-        catalog.games.push(kept);
+    #[test]
+    fn rescan_availability_keeps_a_game_available_under_its_tracked_root() {
+        let exe_path = temp_path("rescan_tracked_root").with_extension("exe");
+        fs::write(&exe_path, b"").unwrap();
+        let folder = exe_path.parent().unwrap().to_str().unwrap().to_string();
 
-        mark_unavailable_under(&mut catalog, "C:\\Games");
+        let mut game = sample_game(exe_path.to_str().unwrap());
+        game.folder_path = folder.clone();
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+        catalog.settings.root_folders.push(folder);
 
-        let removed = catalog.games.iter().find(|g| g.id == "removed").unwrap();
-        let kept = catalog.games.iter().find(|g| g.id == "kept").unwrap();
-        assert!(!removed.available, "game under the removed root should be marked unavailable");
-        assert!(kept.available, "game under an unrelated folder should be untouched");
+        rescan_availability(&mut catalog);
+        fs::remove_file(&exe_path).ok();
+
+        assert!(catalog.games[0].available, "exe exists and its folder is under a tracked root");
     }
 
     #[test]
