@@ -33,6 +33,9 @@
       <nav>
         <a href="#" id="nav-gallery" class="nav-link">Gallery</a>
         <a href="#" id="nav-bindings" class="nav-link">Tag Bindings</a>
+        <button id="sync-library-button" type="button" class="sync-button" title="Rescan your library folders for new games">
+          Sync
+        </button>
       </nav>
     </header>
 
@@ -85,6 +88,26 @@
                   Show a confirmation prompt before launching a game, instead of launching immediately when its tag is scanned.
                 </p>
               </div>
+
+              <div class="settings-field">
+                <label class="settings-checkbox-row">
+                  <input type="checkbox" id="show-store-badges-checkbox" />
+                  Show store badges
+                </label>
+                <p class="settings-field-hint">
+                  Mark each gallery card with the storefront (e.g. Steam) its game was installed through.
+                </p>
+              </div>
+
+              <div class="settings-field">
+                <label class="settings-checkbox-row">
+                  <input type="checkbox" id="sync-on-startup-checkbox" />
+                  Sync library on startup
+                </label>
+                <p class="settings-field-hint">
+                  Automatically rescan your library folders for new games each time the app opens.
+                </p>
+              </div>
             </section>
 
             <section id="settings-panel-game" class="settings-panel" hidden>
@@ -125,17 +148,6 @@
       </form>
     </dialog>
 
-    <dialog id="scan-review-dialog">
-      <form method="dialog">
-        <h2>Confirm detected games</h2>
-        <div id="scan-review-list"></div>
-        <menu>
-          <button id="scan-review-confirm" type="button">Add confirmed games</button>
-          <button type="submit">Cancel</button>
-        </menu>
-      </form>
-    </dialog>
-
     <dialog id="close-prompt-dialog">
       <form method="dialog">
         <h2>Close Cart Reader?</h2>
@@ -163,11 +175,17 @@
     </dialog>
 
     <dialog id="progress-dialog">
+      <h2 id="progress-dialog-message"></h2>
+      <progress></progress>
+    </dialog>
+
+    <dialog id="confirm-dialog">
       <form method="dialog">
-        <h2 id="progress-dialog-message"></h2>
-        <progress></progress>
+        <h2 id="confirm-dialog-title"></h2>
+        <p id="confirm-dialog-message" hidden></p>
         <menu>
-          <button type="submit">Close</button>
+          <button id="confirm-dialog-confirm" type="button"></button>
+          <button type="submit">Cancel</button>
         </menu>
       </form>
     </dialog>

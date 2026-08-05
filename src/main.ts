@@ -2,16 +2,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Catalog, Game, ScanCandidate } from './types'
+import type { Catalog, ConfirmResult, Game, ScanCandidate, SyncResult } from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
 import { renderSettings } from './settings/settings'
-import {
-  renderScanReview,
-  collectConfirmedGames,
-  renderBindDialog,
-  renderBindingsList,
-} from './binding/binding'
+import { renderBindDialog, renderBindingsList, type ConfirmedGameInput } from './binding/binding'
 import { appendLog } from './log/log'
 
 let catalog: Catalog
@@ -60,6 +55,12 @@ const closeBehaviorSelect = document.querySelector<HTMLSelectElement>(
 const confirmBeforeLaunchCheckbox = document.querySelector<HTMLInputElement>(
   '#confirm-before-launch-checkbox',
 )!
+const showStoreBadgesCheckbox = document.querySelector<HTMLInputElement>(
+  '#show-store-badges-checkbox',
+)!
+const syncOnStartupCheckbox = document.querySelector<HTMLInputElement>(
+  '#sync-on-startup-checkbox',
+)!
 const simulateInput = document.querySelector<HTMLInputElement>(
   '#simulate-tag-input',
 )!
@@ -67,14 +68,9 @@ const simulateBtn = document.querySelector<HTMLButtonElement>(
   '#simulate-tag-button',
 )!
 
-const scanReviewDialog = document.querySelector<HTMLDialogElement>(
-  '#scan-review-dialog',
+const syncLibraryButton = document.querySelector<HTMLButtonElement>(
+  '#sync-library-button',
 )!
-const scanReviewList = document.querySelector<HTMLElement>('#scan-review-list')!
-const scanReviewConfirmBtn = document.querySelector<HTMLButtonElement>(
-  '#scan-review-confirm',
-)!
-let scanReviewFolderPath = ''
 
 const bindDialog = document.querySelector<HTMLDialogElement>('#bind-dialog')!
 const bindTagLabel = document.querySelector<HTMLElement>('#bind-tag-uid')!
@@ -122,12 +118,53 @@ const progressDialog = document.querySelector<HTMLDialogElement>(
 const progressDialogMessageEl = document.querySelector<HTMLElement>(
   '#progress-dialog-message',
 )!
+// No close button (nothing to cancel -- the underlying command has no
+// abort mechanism and keeps running either way) means Escape shouldn't be
+// able to dismiss it either; a <dialog> still fires 'cancel' on Escape
+// even with no close button in its markup.
+progressDialog.addEventListener('cancel', (e) => e.preventDefault())
 const launchErrorDialog = document.querySelector<HTMLDialogElement>(
   '#launch-error-dialog',
 )!
 const launchErrorMessageEl = document.querySelector<HTMLElement>(
   '#launch-error-message',
 )!
+
+const confirmDialog = document.querySelector<HTMLDialogElement>('#confirm-dialog')!
+const confirmDialogTitleEl = document.querySelector<HTMLElement>('#confirm-dialog-title')!
+const confirmDialogMessageEl = document.querySelector<HTMLElement>('#confirm-dialog-message')!
+const confirmDialogConfirmBtn = document.querySelector<HTMLButtonElement>(
+  '#confirm-dialog-confirm',
+)!
+confirmDialogConfirmBtn.addEventListener('click', () => confirmDialog.close('confirmed'))
+
+/** Styled replacement for window.confirm(), matching the rest of the
+ * app's dialog chrome. Resolves true only when the Confirm button was
+ * clicked (dialog.close('confirmed')) -- the Cancel button's plain
+ * form-submit and Escape both close with an empty returnValue, so both
+ * read as "cancelled" the same way. */
+function showConfirmDialog(options: {
+  title: string
+  message?: string
+  confirmLabel: string
+}): Promise<boolean> {
+  confirmDialogTitleEl.textContent = options.title
+  confirmDialogMessageEl.textContent = options.message ?? ''
+  confirmDialogMessageEl.hidden = !options.message
+  confirmDialogConfirmBtn.textContent = options.confirmLabel
+
+  confirmDialog.returnValue = ''
+  if (confirmDialog.open) confirmDialog.close()
+  confirmDialog.showModal()
+
+  return new Promise((resolve) => {
+    confirmDialog.addEventListener(
+      'close',
+      () => resolve(confirmDialog.returnValue === 'confirmed'),
+      { once: true },
+    )
+  })
+}
 
 const READER_STATUS_LABEL: Record<string, string> = {
   disconnected: 'Reader: disconnected',
@@ -219,10 +256,13 @@ function refresh(): void {
     onRefreshArtwork: handleRefreshArtwork,
   })
   confirmBeforeLaunchCheckbox.checked = catalog.settings.confirmBeforeLaunch
+  showStoreBadgesCheckbox.checked = catalog.settings.showStoreBadges
+  syncOnStartupCheckbox.checked = catalog.settings.syncOnStartup
   renderBindingsList(
     bindingsListEl,
     catalog.bindings,
     catalog.games,
+    handleRebindTag,
     handleUnbindTag,
   )
   outputLogEl.hidden = !catalog.settings.showOutputLog
@@ -236,6 +276,8 @@ async function updateSettings(
     confirmBeforeLaunch: boolean
     showOutputLog: boolean
     closeBehavior: 'ask' | 'minimize' | 'quit'
+    showStoreBadges: boolean
+    syncOnStartup: boolean
   }>,
 ): Promise<void> {
   const result = await invokeOrAlert<Catalog>('update_settings', {
@@ -243,6 +285,8 @@ async function updateSettings(
     confirmBeforeLaunch: catalog.settings.confirmBeforeLaunch,
     showOutputLog: catalog.settings.showOutputLog,
     closeBehavior: catalog.settings.closeBehavior,
+    showStoreBadges: catalog.settings.showStoreBadges,
+    syncOnStartup: catalog.settings.syncOnStartup,
     ...overrides,
   })
   if (!result) return
@@ -271,13 +315,78 @@ async function loadReaderState(): Promise<void> {
 }
 
 async function handleAddFolder(path: string): Promise<void> {
+  showProgressDialog('Adding folder...')
   const candidates = await invokeOrAlert<ScanCandidate[]>('scan_folder', {
     path,
   })
-  if (!candidates) return
-  scanReviewFolderPath = path
-  renderScanReview(scanReviewList, candidates)
-  scanReviewDialog.showModal()
+  if (!candidates) {
+    progressDialog.close()
+    return
+  }
+
+  const skipped = candidates.filter((c) => c.exePath === null)
+  const games: ConfirmedGameInput[] = candidates
+    .filter((c): c is ScanCandidate & { exePath: string } => c.exePath !== null)
+    .map((c) => ({ folderPath: c.folderPath, name: c.name, exePath: c.exePath }))
+
+  if (skipped.length > 0) {
+    log(
+      `Skipped ${skipped.length} folder(s) in "${path}" (couldn't detect an exe): ` +
+        skipped.map((c) => c.name).join(', '),
+    )
+  }
+
+  const confirmResult = await invokeOrAlert<ConfirmResult>('confirm_games', { games })
+  if (!confirmResult) {
+    progressDialog.close()
+    return
+  }
+
+  const result = await invokeOrAlert<Catalog>('add_root_folder', { path })
+  progressDialog.close()
+  if (!result) return
+  catalog = result
+  refresh()
+
+  // confirmResult.added, not games.length -- re-adding a previously
+  // removed folder finds the same candidates again, but confirm_games
+  // skips ones already in the catalog (they were never deleted, only
+  // marked unavailable), so games.length can overstate what actually got
+  // (re)confirmed.
+  if (games.length === 0 && skipped.length === 0) {
+    showToast(`No games found in "${path}".`)
+  } else if (confirmResult.added === 0) {
+    showToast(`"${path}" is already in your library.`)
+  } else {
+    showToast(
+      `Added ${confirmResult.added} game(s) from "${path}".` +
+        (skipped.length > 0 ? ` ${skipped.length} skipped: exe not detected (see Logs).` : ''),
+    )
+  }
+}
+
+async function handleSyncLibrary(): Promise<void> {
+  showProgressDialog('Syncing library...')
+  const result = await invokeOrAlert<SyncResult>('sync_library')
+  progressDialog.close()
+  if (!result) return
+  catalog = result.catalog
+  refresh()
+
+  if (result.skippedNames.length > 0) {
+    log(`Sync skipped ${result.skippedNames.length} folder(s) (couldn't detect an exe): ${result.skippedNames.join(', ')}`)
+  }
+
+  if (result.added === 0 && result.skippedNames.length === 0) {
+    showToast('Library is up to date.')
+  } else {
+    showToast(
+      `Added ${result.added} new game(s).` +
+        (result.skippedNames.length > 0
+          ? ` ${result.skippedNames.length} skipped: exe not detected (see Logs).`
+          : ''),
+    )
+  }
 }
 
 async function handleRefreshArtwork(): Promise<void> {
@@ -291,7 +400,34 @@ async function handleRefreshArtwork(): Promise<void> {
   showToast('Artwork refreshed.')
 }
 
+function isUnderFolder(path: string, root: string): boolean {
+  const normalizedRoot = root.toLowerCase().replace(/\\+$/, '')
+  const normalizedPath = path.toLowerCase()
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(normalizedRoot + '\\')
+}
+
 async function handleRemoveFolder(path: string): Promise<void> {
+  const affectedGameIds = new Set(
+    catalog.games.filter((g) => isUnderFolder(g.folderPath, path)).map((g) => g.id),
+  )
+  const affectedBindings = catalog.bindings.filter((b) => affectedGameIds.has(b.gameId))
+
+  if (affectedBindings.length > 0) {
+    const lines = affectedBindings.map((b) => {
+      const game = catalog.games.find((g) => g.id === b.gameId)
+      return `${b.tagUid} -> ${game?.name ?? b.gameId}`
+    })
+    const proceed = await showConfirmDialog({
+      title: `Remove "${path}"?`,
+      message: `${affectedBindings.length} tag(s) are bound to games in this folder:\n\n${lines.join('\n')}\n\nRemoving it will make those games unavailable.`,
+      confirmLabel: 'Remove',
+    })
+    if (!proceed) {
+      log(`Removal of "${path}" cancelled at confirm prompt`)
+      return
+    }
+  }
+
   const result = await invokeOrAlert<Catalog>('remove_root_folder', { path })
   if (!result) return
   catalog = result
@@ -300,6 +436,14 @@ async function handleRemoveFolder(path: string): Promise<void> {
 
 async function handleToggleConfirmBeforeLaunch(value: boolean): Promise<void> {
   await updateSettings({ confirmBeforeLaunch: value })
+}
+
+async function handleToggleShowStoreBadges(value: boolean): Promise<void> {
+  await updateSettings({ showStoreBadges: value })
+}
+
+async function handleToggleSyncOnStartup(value: boolean): Promise<void> {
+  await updateSettings({ syncOnStartup: value })
 }
 
 async function handleToggleShowOutputLog(value: boolean): Promise<void> {
@@ -315,8 +459,15 @@ async function handleChangeCloseBehavior(
 function openBindDialog(tagUid: string): void {
   bindTagUid = tagUid
   bindTagLabel.textContent = tagUid
-  renderBindDialog(bindSelect, catalog.games)
+  // Pre-selects the tag's current game when it already has a binding
+  // (rebinding), leaves the browser's default (first option) otherwise.
+  const currentGameId = catalog.bindings.find((b) => b.tagUid === tagUid)?.gameId
+  renderBindDialog(bindSelect, catalog.games, currentGameId)
   bindDialog.showModal()
+}
+
+function handleRebindTag(tagUid: string): void {
+  openBindDialog(tagUid)
 }
 
 function showContextMenu(event: MouseEvent, gameId: string): void {
@@ -421,8 +572,13 @@ const runningWaiters = new Map<string, () => void>()
 function renderGalleryView(): void {
   renderGallery(
     galleryEl,
-    { games: catalog.games, bindings: catalog.bindings, runningGameIds },
-    { onContextMenu: showContextMenu, onLaunch: handleLaunchFromGallery },
+    {
+      games: catalog.games,
+      bindings: catalog.bindings,
+      runningGameIds,
+      showStoreBadges: catalog.settings.showStoreBadges,
+    },
+    { onContextMenu: showContextMenu, onLaunch: handleLaunchFromGallery, onStop: handleStopGame },
   )
 }
 
@@ -473,7 +629,7 @@ async function launchGame(game: Game): Promise<void> {
 
   if (
     catalog.settings.confirmBeforeLaunch &&
-    !window.confirm(`Launch "${game.name}"?`)
+    !(await showConfirmDialog({ title: `Launch "${game.name}"?`, confirmLabel: 'Launch' }))
   ) {
     log(`Launch of "${game.name}" cancelled at confirm prompt`)
     return
@@ -503,6 +659,35 @@ async function launchGame(game: Game): Promise<void> {
 function handleLaunchFromGallery(gameId: string): void {
   const game = catalog.games.find((g) => g.id === gameId)
   if (game) launchGame(game)
+}
+
+async function handleStopGame(gameId: string): Promise<void> {
+  const game = catalog.games.find((g) => g.id === gameId)
+  if (!game) return
+
+  // Always confirmed, unlike launch (where confirmation is opt-in via
+  // confirmBeforeLaunch) -- stopping force-kills the process with no save
+  // prompt, so an accidental click here loses progress launching never
+  // risks.
+  const stopConfirmed = await showConfirmDialog({
+    title: `Stop "${game.name}"?`,
+    message: 'Any unsaved progress will be lost.',
+    confirmLabel: 'Stop',
+  })
+  if (!stopConfirmed) {
+    log(`Stop of "${game.name}" cancelled at confirm prompt`)
+    return
+  }
+
+  // Optimistic: reflects the stop immediately instead of waiting up to
+  // RUNNING_GAMES_POLL_INTERVAL_MS for the next poll tick to notice. If the
+  // stop actually failed, that same next tick corrects it back.
+  runningGameIds.delete(gameId)
+  renderGalleryView()
+
+  const stopped = await invokeOrAlert<boolean>('stop_game', { folderPath: game.folderPath })
+  if (stopped === undefined) return // invokeOrAlert already surfaced the error
+  log(stopped ? `Stopped "${game.name}"` : `"${game.name}" was already stopped`)
 }
 
 /** Looks up a tag UID against the catalog and reacts: alerts on an
@@ -551,17 +736,7 @@ function triggerSimulatedTagEvent(): void {
   }
 }
 
-scanReviewConfirmBtn.addEventListener('click', async () => {
-  const games = collectConfirmedGames(scanReviewList)
-  if (!(await invokeOrAlert<Catalog>('confirm_games', { games }))) return
-  const result = await invokeOrAlert<Catalog>('add_root_folder', {
-    path: scanReviewFolderPath,
-  })
-  if (!result) return
-  catalog = result
-  scanReviewDialog.close()
-  refresh()
-})
+syncLibraryButton.addEventListener('click', () => handleSyncLibrary())
 
 bindConfirmBtn.addEventListener('click', async () => {
   const gameId = bindSelect.value
@@ -627,6 +802,12 @@ closeBehaviorSelect.addEventListener('change', () =>
 )
 confirmBeforeLaunchCheckbox.addEventListener('change', () =>
   handleToggleConfirmBeforeLaunch(confirmBeforeLaunchCheckbox.checked),
+)
+showStoreBadgesCheckbox.addEventListener('change', () =>
+  handleToggleShowStoreBadges(showStoreBadgesCheckbox.checked),
+)
+syncOnStartupCheckbox.addEventListener('change', () =>
+  handleToggleSyncOnStartup(syncOnStartupCheckbox.checked),
 )
 
 // The Dev section only makes sense against a running dev server -- a
@@ -720,7 +901,13 @@ closePromptQuitBtn.addEventListener('click', () => resolveClosePrompt(false))
 
 window.addEventListener('DOMContentLoaded', () => {
   showView('gallery')
-  loadCatalog()
+  // Chained rather than awaited inline in this handler -- loadReaderState
+  // and pollRunningGames below shouldn't wait on a sync that can take a
+  // few seconds for a large library; they only need the initial catalog
+  // load, not the sync that may follow it.
+  loadCatalog().then(() => {
+    if (catalog && catalog.settings.syncOnStartup) handleSyncLibrary()
+  })
   loadReaderState()
   pollRunningGames()
   setInterval(pollRunningGames, RUNNING_GAMES_POLL_INTERVAL_MS)

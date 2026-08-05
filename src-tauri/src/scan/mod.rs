@@ -93,12 +93,43 @@ fn score_candidate(folder_name: &str, exe: &Path) -> (u8, u64) {
     (name_score, size)
 }
 
+const DANGEROUS_ROOT_NAMES: &[&str] = &[
+    "windows",
+    "system32",
+    "syswow64",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
+];
+
+/// Refuses drive roots (`C:\`) and a denylist of OS-critical directory
+/// names -- cataloging one of these isn't an attack scenario, it's an
+/// ordinary typo/misclick in the "Add folder" text field or folder-browse
+/// dialog, but the app's Stop button force-kills every process under a
+/// cataloged game's folder. Scanning `C:\Windows` in would let one Stop
+/// click take down arbitrary running system processes.
+pub fn is_scannable_root(root: &Path) -> bool {
+    if root.parent().is_none() {
+        return false; // drive root: C:\, D:\, ...
+    }
+    match root.file_name().and_then(|n| n.to_str()) {
+        Some(name) => !DANGEROUS_ROOT_NAMES.contains(&name.to_lowercase().as_str()),
+        None => false,
+    }
+}
+
 /// Scans each immediate subfolder of `root` for a plausible main exe.
 /// Subfolders where nothing plausible is found are still returned with
 /// `exe_path: None` — flagged, not silently dropped, per the spec's
 /// Success Criteria ("any folder where no plausible exe is found is
-/// flagged, not silently dropped").
+/// flagged, not silently dropped"). Returns nothing at all for a root
+/// `is_scannable_root` rejects -- see its doc comment for why.
 pub fn scan_root(root: &Path) -> Vec<ScanCandidate> {
+    if !is_scannable_root(root) {
+        return Vec::new();
+    }
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
@@ -127,6 +158,32 @@ pub fn scan_root(root: &Path) -> Vec<ScanCandidate> {
     }
 
     candidates
+}
+
+/// Scans every registered root folder for subfolders not already in
+/// `known_folder_paths` -- the "what's new" half of the gallery's Sync
+/// action. Unlike `scan_root`'s caller in the old "add one folder" flow,
+/// this doesn't drop candidates with no confidently-detected exe -- it
+/// leaves that call to whoever's adding the results to the catalog, since
+/// they're the one who knows whether "skipped, here's how many" needs
+/// reporting to the user. A root folder that's gone missing (drive
+/// unplugged, moved, deleted since it was registered) is skipped, rather
+/// than failing the whole sync.
+pub fn scan_new_games(root_folders: &[String], known_folder_paths: &[String]) -> Vec<ScanCandidate> {
+    let mut found = Vec::new();
+    for root_folder in root_folders {
+        let root = Path::new(root_folder);
+        if !root.is_dir() {
+            continue;
+        }
+        for candidate in scan_root(root) {
+            if known_folder_paths.iter().any(|p| p == &candidate.folder_path) {
+                continue;
+            }
+            found.push(candidate);
+        }
+    }
+    found
 }
 
 const FOLDER_ART_CANDIDATES: &[&str] = &[
@@ -301,6 +358,60 @@ mod tests {
     fn write_file(path: &Path, size: usize) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, vec![0u8; size]).unwrap();
+    }
+
+    #[test]
+    fn scan_root_refuses_a_drive_root() {
+        let candidates = scan_root(Path::new(r"C:\"));
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn scan_root_refuses_a_denylisted_os_directory_regardless_of_case() {
+        assert!(scan_root(Path::new(r"C:\Windows")).is_empty());
+        assert!(scan_root(Path::new(r"C:\WINDOWS")).is_empty());
+        assert!(scan_root(Path::new(r"C:\Program Files")).is_empty());
+    }
+
+    #[test]
+    fn scan_root_still_scans_an_ordinary_games_folder() {
+        let root = temp_root("ordinary_root");
+        write_file(&root.join("GameA").join("GameA.exe"), 10);
+
+        let candidates = scan_root(&root);
+        fs::remove_dir_all(&root).ok();
+
+        assert_eq!(candidates.len(), 1, "a real, non-denylisted folder name should still scan normally");
+    }
+
+    #[test]
+    fn scan_new_games_excludes_known_folders_but_keeps_ambiguous_ones() {
+        let root = temp_root("sync");
+        write_file(&root.join("NewGame").join("NewGame.exe"), 10);
+        write_file(&root.join("AlreadyCataloged").join("AlreadyCataloged.exe"), 10);
+        fs::create_dir_all(root.join("NoExeFound")).unwrap();
+
+        let known = vec![root.join("AlreadyCataloged").to_string_lossy().to_string()];
+        let root_folders = vec![root.to_string_lossy().to_string()];
+
+        let mut found = scan_new_games(&root_folders, &known);
+        fs::remove_dir_all(&root).ok();
+        found.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(found.len(), 2, "AlreadyCataloged is excluded, but NewGame and the ambiguous folder both come back for the caller to report on");
+        assert_eq!(found[0].name, "NewGame");
+        assert!(found[0].exe_path.is_some());
+        assert_eq!(found[1].name, "NoExeFound");
+        assert!(found[1].exe_path.is_none());
+    }
+
+    #[test]
+    fn scan_new_games_skips_a_root_folder_that_no_longer_exists() {
+        let missing_root = vec!["C:\\Games\\NoLongerThere".to_string()];
+
+        let found = scan_new_games(&missing_root, &[]);
+
+        assert!(found.is_empty());
     }
 
     #[test]

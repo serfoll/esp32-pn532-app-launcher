@@ -3,7 +3,11 @@ export interface Settings {
   confirmBeforeLaunch: boolean;
   showOutputLog: boolean;
   closeBehavior: "ask" | "minimize" | "quit";
+  showStoreBadges: boolean;
+  syncOnStartup: boolean;
 }
+
+export type Store = "steam";
 
 export interface Game {
   id: string;
@@ -13,6 +17,7 @@ export interface Game {
   artworkPath: string | null;
   available: boolean;
   hasCustomArtwork: boolean;
+  store: Store | null;
 }
 
 export interface Binding {
@@ -31,4 +36,15 @@ export interface ScanCandidate {
   folderPath: string;
   name: string;
   exePath: string | null;
+}
+
+export interface SyncResult {
+  catalog: Catalog;
+  added: number;
+  skippedNames: string[];
+}
+
+export interface ConfirmResult {
+  catalog: Catalog;
+  added: number;
 }

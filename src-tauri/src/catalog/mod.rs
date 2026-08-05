@@ -1,10 +1,16 @@
 // Local JSON catalog: games, tag bindings, and settings. Single source of
 // truth for what the gallery shows and what a tag insert launches.
 
+use crate::launch::Store;
+use crate::scan;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -53,6 +59,18 @@ pub struct Settings {
     // the close-behavior prompt existed at all (field missing entirely).
     #[serde(default, deserialize_with = "deserialize_close_behavior")]
     pub close_behavior: CloseBehavior,
+    // #[serde(default = "default_true")] so catalog.json files written
+    // before this field existed still load, defaulting to shown (matches
+    // the toggle's own default) rather than serde's usual missing-bool-is-
+    // false.
+    #[serde(default = "default_true")]
+    pub show_store_badges: bool,
+    // #[serde(default = "default_true")] so catalog.json files written
+    // before this setting existed still load with the new default-on
+    // behavior, matching the toggle's own default, rather than serde's
+    // usual missing-bool-is-false.
+    #[serde(default = "default_true")]
+    pub sync_on_startup: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -69,6 +87,12 @@ pub struct Game {
     // result. #[serde(default)] keeps older catalog.json files loadable.
     #[serde(default)]
     pub has_custom_artwork: bool,
+    // #[serde(default)] so catalog.json files written before this field
+    // existed still load (missing -> None, no badge) instead of failing to
+    // parse. Backfilled by the next "Refresh artwork" or rescan, same as
+    // has_custom_artwork.
+    #[serde(default)]
+    pub store: Option<Store>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -96,6 +120,8 @@ impl Default for Catalog {
                 confirm_before_launch: false,
                 show_output_log: false,
                 close_behavior: CloseBehavior::Ask,
+                show_store_badges: true,
+                sync_on_startup: true,
             },
             games: Vec::new(),
             bindings: Vec::new(),
@@ -126,14 +152,139 @@ pub fn save(path: &Path, catalog: &Catalog) -> io::Result<()> {
     Ok(())
 }
 
-/// Marks games whose exePath no longer exists on disk as unavailable (and
-/// ones that reappeared as available again). Never adds, removes, or
+/// Marks a game unavailable unless its exe still exists on disk *and* its
+/// folder still falls under one of the currently-tracked root folders (and
+/// marks it available again once both hold). Never adds, removes, or
 /// otherwise touches `games` identity or `bindings` — availability is the
 /// only thing a rescan is allowed to change.
+///
+/// The root-folder half matters because removing a root folder from
+/// Settings doesn't delete anything on disk -- the exe can still
+/// physically exist, so an exe-existence check alone never notices the
+/// removal, and the game keeps looking like an active part of the library
+/// on every subsequent catalog load (get_catalog calls this on every app
+/// launch and refresh). Every legitimately-cataloged game's folder is
+/// already a subfolder of the root it was scanned from, so this can't
+/// false-negative a game that's still genuinely part of the library.
 pub fn rescan_availability(catalog: &mut Catalog) {
+    let root_folders: Vec<String> = catalog
+        .settings
+        .root_folders
+        .iter()
+        .map(|p| p.to_lowercase())
+        .collect();
+
     for game in &mut catalog.games {
-        game.available = Path::new(&game.exe_path).exists();
+        let exe_exists = Path::new(&game.exe_path).exists();
+        let folder_lower = game.folder_path.to_lowercase();
+        let under_tracked_root = root_folders
+            .iter()
+            .any(|root| Path::new(&folder_lower).starts_with(Path::new(root)));
+        game.available = exe_exists && under_tracked_root;
     }
+}
+
+/// Detects the storefront for any game that doesn't have one on record yet
+/// -- covers games cataloged before store detection existed. Cheap enough
+/// (one manifest-file read per game) to run on every catalog load rather
+/// than requiring a manual "Refresh artwork" click first: without this, a
+/// game added before this feature shipped would show no badge until the
+/// user happened to hit refresh, which isn't something the UI hints at.
+pub fn backfill_stores(catalog: &mut Catalog) {
+    for game in &mut catalog.games {
+        if game.store.is_none() {
+            game.store = crate::launch::detect_store(Path::new(&game.folder_path));
+        }
+    }
+}
+
+/// Games use their folder path as `id` — it's already unique per game, so a
+/// separate uuid dependency would just be more code for the same guarantee.
+pub fn sanitize_for_filename(id: &str) -> String {
+    use std::hash::{Hash, Hasher};
+
+    let readable: String = id
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect();
+
+    // The character-substitution above isn't injective -- "A-B" and "A_B"
+    // both sanitize to "A_B", so two different games could collide onto
+    // the same artwork file and silently overwrite each other's art. The
+    // hash suffix (of the real, un-substituted id) makes the full result
+    // collision-resistant while keeping the readable prefix for anyone
+    // browsing the artwork folder by hand.
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    format!("{readable}_{:x}", hasher.finish())
+}
+
+/// Resolves and writes artwork for one game: SteamGridDB first when a
+/// (reachability-checked) key is available, local folder art / exe icon
+/// otherwise or on any SteamGridDB failure. Shared by `add_confirmed_games`
+/// and `refresh_all_artwork` so the fallback chain only lives in one place.
+pub fn resolve_game_artwork(
+    name: &str,
+    folder_path: &str,
+    exe_path: &str,
+    dest: &Path,
+    steamgriddb_key: Option<&str>,
+) -> Option<PathBuf> {
+    steamgriddb_key
+        .and_then(|key| scan::fetch_steamgriddb_grid(name, key, dest))
+        .or_else(|| scan::resolve_artwork(Path::new(folder_path), Some(Path::new(exe_path)), dest))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfirmedGame {
+    pub folder_path: String,
+    pub name: String,
+    pub exe_path: String,
+}
+
+/// Adds scanned candidates to the catalog, resolving artwork and store for
+/// each. Shared by `confirm_games` (one folder, called right after the user
+/// points the app at it) and `sync_library` (every already-registered
+/// folder, called from the gallery's Sync button) so the add-a-game logic
+/// only lives in one place. Candidates already in the catalog (same folder
+/// path) are skipped rather than duplicated.
+pub fn add_confirmed_games(
+    catalog: &mut Catalog,
+    artwork_dir: &Path,
+    games: Vec<ConfirmedGame>,
+    steamgriddb_key: Option<&str>,
+) -> usize {
+    let mut added = 0;
+    for g in games {
+        if catalog
+            .games
+            .iter()
+            .any(|existing| existing.folder_path == g.folder_path)
+        {
+            continue;
+        }
+
+        let dest = artwork_dir.join(format!("{}.png", sanitize_for_filename(&g.folder_path)));
+        let artwork_path =
+            resolve_game_artwork(&g.name, &g.folder_path, &g.exe_path, &dest, steamgriddb_key)
+                .map(|p| p.to_string_lossy().to_string());
+
+        let store = crate::launch::detect_store(Path::new(&g.folder_path));
+
+        catalog.games.push(Game {
+            available: Path::new(&g.exe_path).exists(),
+            id: g.folder_path.clone(),
+            name: g.name,
+            folder_path: g.folder_path,
+            exe_path: g.exe_path,
+            artwork_path,
+            has_custom_artwork: false,
+            store,
+        });
+        added += 1;
+    }
+    added
 }
 
 #[cfg(test)]
@@ -146,6 +297,16 @@ mod tests {
         env::temp_dir().join(format!("cart_reader_catalog_test_{}_{}.json", name, std::process::id()))
     }
 
+    #[test]
+    fn sanitize_for_filename_does_not_collide_on_ids_that_share_a_naive_sanitization() {
+        // Both naively sanitize to "C__Games_A_B" (":" "-" "\\" all -> "_"),
+        // which is exactly the collision that let one game's artwork
+        // silently overwrite another's.
+        let a = sanitize_for_filename("C:\\Games\\A-B");
+        let b = sanitize_for_filename("C:\\Games\\A_B");
+        assert_ne!(a, b, "distinct ids must not sanitize to the same filename");
+    }
+
     fn sample_game(exe_path: &str) -> Game {
         Game {
             id: "g1".into(),
@@ -155,7 +316,119 @@ mod tests {
             artwork_path: None,
             available: true,
             has_custom_artwork: false,
+            store: None,
         }
+    }
+
+    #[test]
+    fn add_confirmed_games_skips_already_cataloged_folders_and_adds_new_ones() {
+        let mut catalog = Catalog::default();
+        catalog.games.push(sample_game("C:\\Games\\SomeGame\\Game.exe"));
+
+        let games = vec![
+            ConfirmedGame {
+                folder_path: "C:\\Games\\SomeGame".into(),
+                name: "Duplicate".into(),
+                exe_path: "C:\\Games\\SomeGame\\Game.exe".into(),
+            },
+            ConfirmedGame {
+                folder_path: "C:\\Games\\NewGame".into(),
+                name: "New Game".into(),
+                exe_path: "C:\\Games\\NewGame\\NewGame.exe".into(),
+            },
+        ];
+
+        let added_count =
+            add_confirmed_games(&mut catalog, Path::new("C:\\nonexistent_artwork_dir"), games, None);
+
+        assert_eq!(added_count, 1, "only the new game should count as added, not the skipped duplicate");
+        assert_eq!(catalog.games.len(), 2, "the already-cataloged folder should be skipped");
+        let new_game = catalog
+            .games
+            .iter()
+            .find(|g| g.folder_path == "C:\\Games\\NewGame")
+            .expect("the new game should have been added");
+        assert_eq!(new_game.name, "New Game");
+        assert!(!new_game.available, "exe doesn't actually exist on disk");
+    }
+
+    #[test]
+    fn backfill_stores_detects_store_for_a_game_missing_one() {
+        let root = env::temp_dir().join(format!("cart_reader_backfill_match_{}", std::process::id()));
+        fs::remove_dir_all(&root).ok();
+        let game_dir = root.join("steamapps").join("common").join("SomeGame");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(
+            root.join("steamapps").join("appmanifest_12345.acf"),
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"12345\"\n\t\"installdir\"\t\t\"SomeGame\"\n}\n",
+        )
+        .unwrap();
+
+        let mut game = sample_game("Game.exe");
+        game.folder_path = game_dir.to_str().unwrap().to_string();
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+
+        backfill_stores(&mut catalog);
+        fs::remove_dir_all(&root).ok();
+
+        assert_eq!(catalog.games[0].store, Some(crate::launch::Store::Steam));
+    }
+
+    #[test]
+    fn rescan_availability_marks_a_game_unavailable_once_its_root_is_untracked() {
+        // The exe genuinely still exists on disk -- removing a root folder
+        // never deletes anything -- so an exe-existence check alone would
+        // never notice this game's root was untracked. This is the exact
+        // bug: without the root-folder half of the check, a removed
+        // folder's games kept showing as available on every subsequent
+        // catalog load.
+        let exe_path = temp_path("rescan_untracked_root").with_extension("exe");
+        fs::write(&exe_path, b"").unwrap();
+
+        let mut game = sample_game(exe_path.to_str().unwrap());
+        game.folder_path = exe_path.parent().unwrap().to_str().unwrap().to_string();
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+        // root_folders left empty: this game's folder isn't tracked by any
+        // currently-configured root, same as right after its one root
+        // folder was removed from Settings.
+
+        rescan_availability(&mut catalog);
+        fs::remove_file(&exe_path).ok();
+
+        assert!(!catalog.games[0].available, "exe exists, but its folder isn't under any tracked root");
+    }
+
+    #[test]
+    fn rescan_availability_keeps_a_game_available_under_its_tracked_root() {
+        let exe_path = temp_path("rescan_tracked_root").with_extension("exe");
+        fs::write(&exe_path, b"").unwrap();
+        let folder = exe_path.parent().unwrap().to_str().unwrap().to_string();
+
+        let mut game = sample_game(exe_path.to_str().unwrap());
+        game.folder_path = folder.clone();
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+        catalog.settings.root_folders.push(folder);
+
+        rescan_availability(&mut catalog);
+        fs::remove_file(&exe_path).ok();
+
+        assert!(catalog.games[0].available, "exe exists and its folder is under a tracked root");
+    }
+
+    #[test]
+    fn backfill_stores_leaves_an_already_known_store_alone() {
+        let mut game = sample_game("Game.exe");
+        game.folder_path = "C:\\Games\\NotSteamAnymore".into();
+        game.store = Some(crate::launch::Store::Steam);
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+
+        backfill_stores(&mut catalog);
+
+        assert_eq!(catalog.games[0].store, Some(crate::launch::Store::Steam));
     }
 
     #[test]
@@ -268,6 +541,37 @@ mod tests {
         fs::remove_file(&path).ok();
 
         assert!(!loaded.games[0].has_custom_artwork);
+    }
+
+    #[test]
+    fn loads_pre_store_catalog_with_game_store_defaulted_none_and_setting_defaulted_true() {
+        let path = temp_path("legacy_store_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false},"games":[{"id":"g1","name":"Some Game","folderPath":"C:\\Games\\SomeGame","exePath":"C:\\Games\\SomeGame\\Game.exe","artworkPath":null,"available":true,"hasCustomArtwork":false}],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before store existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.games[0].store, None);
+        assert!(loaded.settings.show_store_badges);
+    }
+
+    #[test]
+    fn loads_pre_sync_on_startup_catalog_with_setting_defaulted_true() {
+        let path = temp_path("legacy_sync_on_startup_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false,"showStoreBadges":true},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before syncOnStartup existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert!(loaded.settings.sync_on_startup);
     }
 
     #[test]

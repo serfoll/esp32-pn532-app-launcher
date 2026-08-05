@@ -1,5 +1,6 @@
 :root {
   --titlebar-height: 34px;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.35);
 
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -33,6 +34,41 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Scrollbars: invisible until the scrollable area itself is hovered, then
+   a thin thumb in --scrollbar-thumb (light/dark aware) fades in -- keeps
+   the gallery/dialogs/log from showing a permanent OS-styled gray bar
+   that doesn't match the rest of the UI. scrollbar-color/-width is the
+   standard property (Firefox, and Chromium/WebView2 121+); the
+   ::-webkit-scrollbar-* rules are the fallback for older WebView2. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
 }
 
 .titlebar,
@@ -167,6 +203,12 @@ nav {
   border-bottom-color: #396cd8;
 }
 
+.sync-button {
+  padding: 0.3em 0.9em;
+  font-size: 0.9em;
+  align-self: center;
+}
+
 .reader-status {
   font-size: 0.85em;
   padding: 0.3em 0.7em;
@@ -227,25 +269,37 @@ button:active {
 
 .toast-container {
   position: fixed;
-  top: calc(var(--titlebar-height) + 0.75em);
-  right: 0.75em;
+  left: 0;
+  right: 0;
+  bottom: 0.75em;
   z-index: 40;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 0.5em;
-  max-width: 320px;
+  padding: 0 0.75em;
+  /* Only the toasts themselves should catch clicks -- the empty space
+     around them (most of the bar's height once there's just one toast)
+     must not block the gallery underneath. */
+  pointer-events: none;
 }
 
 .toast {
+  /* Without this, width: 100% sets only the content box, and the padding
+     below is added on top -- overflowing past the container's own
+     left/right padding instead of sitting flush inside it. */
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 0.5em;
+  width: 100%;
   padding: 0.75em 1em;
   border-radius: 8px;
   background-color: #fff3cd;
   color: #664d03;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   animation: toast-in 0.15s ease;
+  pointer-events: auto;
 }
 
 .toast-message {
@@ -270,7 +324,7 @@ button:active {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -292,15 +346,13 @@ button:active {
   gap: 0.5em;
 }
 
-.game-card.unavailable {
-  opacity: 0.5;
-}
-
 /* --game-status-color feeds the border color into the base rule plus its
    own :hover/:active overrides below, so status (bound/unbound) survives
    interaction instead of getting replaced by the generic button's blue
    hover/gray active accents. */
 .game-art-button {
+  --card-glow: 33, 150, 243;
+
   position: relative;
   display: block;
   width: 100%;
@@ -315,15 +367,32 @@ button:active {
   border-radius: 1rem;
   corner-shape: squircle;
   background: none;
-  box-shadow: none;
+  /* Gives each card the look of a physical case sitting on a shelf: a
+     crisp blue rim, a soft blue glow around that, then a dark contact
+     shadow and a wider ambient one underneath. The rim sits just outside
+     the status border (border-color above) rather than replacing it, so
+     bound/unbound is still readable at a glance. --card-glow holds the one
+     rim/glow hue so the four shadow layers only vary alpha/blur, not color. */
+  box-shadow:
+    0 0 0 1px rgba(var(--card-glow), 0.55),
+    0 0 12px rgba(var(--card-glow), 0.35),
+    0 2px 4px rgba(0, 0, 0, 0.3),
+    0 8px 16px rgba(0, 0, 0, 0.45);
   cursor: pointer;
   overflow: hidden;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .game-art-button:hover,
 .game-art-button:active {
   border-color: var(--game-status-color);
   background: none;
+  box-shadow:
+    0 0 0 1px rgba(var(--card-glow), 0.7),
+    0 0 16px rgba(var(--card-glow), 0.45),
+    0 4px 8px rgba(0, 0, 0, 0.35),
+    0 12px 24px rgba(0, 0, 0, 0.5);
+  transform: translateY(-2px);
 }
 
 .game-art-button--bound {
@@ -362,6 +431,14 @@ button:active {
   opacity: 1;
 }
 
+/* Overlay tints red on hover for the running/stop state -- kept as a
+   modifier on the same element rather than a second span so play/stop
+   never both render at once. */
+.game-play-icon--stop {
+  font-size: 2em;
+  background-color: rgba(120, 0, 0, 0.45);
+}
+
 .game-running-badge {
   position: absolute;
   top: 0.5em;
@@ -385,6 +462,30 @@ button:active {
   }
 }
 
+.game-store-badge {
+  position: absolute;
+  top: 0.5em;
+  right: 0.5em;
+  display: flex;
+  align-items: center;
+  gap: 0.35em;
+  padding: 0.3em 0.6em;
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.6);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  color: #ffffff;
+  font-size: 0.7em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.game-store-badge-icon {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+
 .empty-state {
   color: #666;
 }
@@ -401,6 +502,12 @@ button:active {
   justify-content: space-between;
   gap: 1em;
   padding: 0.5em 0;
+}
+
+.bindings-list-actions {
+  display: flex;
+  gap: 0.5em;
+  flex-shrink: 0;
 }
 
 .root-folder-list li + li,
@@ -438,25 +545,9 @@ button:active {
   }
 }
 
-.add-folder-form,
 .simulate-tag-row {
   display: flex;
   gap: 0.5em;
-}
-
-.scan-review-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.4em 0;
-}
-
-.scan-review-name {
-  min-width: 10em;
-}
-
-.scan-review-exe {
-  flex: 1;
 }
 
 /* Dialogs default to centering across the whole viewport, which lets them
@@ -486,6 +577,22 @@ dialog menu {
   gap: 0.5em;
   padding: 0;
   margin: 1em 0 0;
+}
+
+/* A <p> collapses newlines by default -- #confirm-dialog-message can list
+   several affected tags/games, one per line. */
+#confirm-dialog-message {
+  white-space: pre-line;
+  max-width: 28em;
+}
+
+/* <progress> is an inline-replaced element with a small intrinsic default
+   width (like <img> without a size), so it doesn't stretch to fill the
+   dialog on its own -- the progress dialog's whole point is signaling
+   an in-progress wait, which reads as more substantial full-width. */
+progress {
+  display: block;
+  width: 100%;
 }
 
 /* Settings gets a fixed footprint instead of resizing per section --
@@ -683,6 +790,7 @@ dialog menu {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
+    --scrollbar-thumb: rgba(255, 255, 255, 0.35);
   }
 
   .app-header {
