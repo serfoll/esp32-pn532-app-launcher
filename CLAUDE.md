@@ -32,3 +32,4 @@ This codebase doubles as a teaching workspace: the user is an experienced JS/Pyt
 - **End-of-phase review**: at the end of each phase of work, run both `/agent-skills:code-review-and-quality` and `/mattpocock-skills:code-review`.
 - **End-of-plan checkpoint**: every plan must end with an explicit manual checkpoint where work pauses for user review before the plan is considered complete.
 - **Humanize user-facing copy**: run `/humanizer` on any user-facing copy (UI text, error messages, docs, README content, etc.) before delivering it as final.
+- **Branch + worktree per task**: when picking up a new task, create a dedicated git branch and worktree for it before implementing, rather than working directly on `main`. Name both the same way: `<type>-<task>` (e.g. `feat-gallery-card-launch`), where `<type>` is a conventional-commit-style prefix (`feat`, `fix`, `chore`, `docs`, `refactor`, `test`) and `<task>` is a short kebab-case slug for what the task is about.
