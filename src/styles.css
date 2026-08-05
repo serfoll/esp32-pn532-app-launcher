@@ -1,5 +1,6 @@
 :root {
   --titlebar-height: 34px;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.35);
 
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
@@ -33,6 +34,41 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Scrollbars: invisible until the scrollable area itself is hovered, then
+   a thin thumb in --scrollbar-thumb (light/dark aware) fades in -- keeps
+   the gallery/dialogs/log from showing a permanent OS-styled gray bar
+   that doesn't match the rest of the UI. scrollbar-color/-width is the
+   standard property (Firefox, and Chromium/WebView2 121+); the
+   ::-webkit-scrollbar-* rules are the fallback for older WebView2. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+*:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
 }
 
 .titlebar,
@@ -249,6 +285,10 @@ button:active {
 }
 
 .toast {
+  /* Without this, width: 100% sets only the content box, and the padding
+     below is added on top -- overflowing past the container's own
+     left/right padding instead of sitting flush inside it. */
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 0.5em;
@@ -748,6 +788,7 @@ progress {
   :root {
     color: #f6f6f6;
     background-color: #2f2f2f;
+    --scrollbar-thumb: rgba(255, 255, 255, 0.35);
   }
 
   .app-header {
