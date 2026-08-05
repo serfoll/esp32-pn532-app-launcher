@@ -55,6 +55,7 @@ pub struct ConfirmedGame {
 pub fn get_catalog(app: AppHandle) -> Result<Catalog, String> {
     let mut catalog = load_catalog(&app)?;
     catalog::rescan_availability(&mut catalog);
+    catalog::backfill_stores(&mut catalog);
     save_catalog(&app, &catalog)?;
     Ok(catalog)
 }
@@ -190,14 +191,9 @@ pub fn refresh_all_artwork(app: AppHandle) -> Result<Catalog, String> {
         .ok()
         .filter(|key| scan::steamgriddb_reachable(key));
 
-    for game in &mut catalog.games {
-        // Backfills games cataloged before store detection existed --
-        // cheap enough (one manifest-file read) to redo unconditionally
-        // here, unlike rescan_availability which runs on every app launch.
-        if game.store.is_none() {
-            game.store = crate::launch::detect_store(std::path::Path::new(&game.folder_path));
-        }
+    catalog::backfill_stores(&mut catalog);
 
+    for game in &mut catalog.games {
         if game.has_custom_artwork {
             continue;
         }

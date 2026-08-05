@@ -154,6 +154,20 @@ pub fn rescan_availability(catalog: &mut Catalog) {
     }
 }
 
+/// Detects the storefront for any game that doesn't have one on record yet
+/// -- covers games cataloged before store detection existed. Cheap enough
+/// (one manifest-file read per game) to run on every catalog load rather
+/// than requiring a manual "Refresh artwork" click first: without this, a
+/// game added before this feature shipped would show no badge until the
+/// user happened to hit refresh, which isn't something the UI hints at.
+pub fn backfill_stores(catalog: &mut Catalog) {
+    for game in &mut catalog.games {
+        if game.store.is_none() {
+            game.store = crate::launch::detect_store(Path::new(&game.folder_path));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,6 +189,42 @@ mod tests {
             has_custom_artwork: false,
             store: None,
         }
+    }
+
+    #[test]
+    fn backfill_stores_detects_store_for_a_game_missing_one() {
+        let root = env::temp_dir().join(format!("cart_reader_backfill_match_{}", std::process::id()));
+        fs::remove_dir_all(&root).ok();
+        let game_dir = root.join("steamapps").join("common").join("SomeGame");
+        fs::create_dir_all(&game_dir).unwrap();
+        fs::write(
+            root.join("steamapps").join("appmanifest_12345.acf"),
+            "\"AppState\"\n{\n\t\"appid\"\t\t\"12345\"\n\t\"installdir\"\t\t\"SomeGame\"\n}\n",
+        )
+        .unwrap();
+
+        let mut game = sample_game("Game.exe");
+        game.folder_path = game_dir.to_str().unwrap().to_string();
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+
+        backfill_stores(&mut catalog);
+        fs::remove_dir_all(&root).ok();
+
+        assert_eq!(catalog.games[0].store, Some(crate::launch::Store::Steam));
+    }
+
+    #[test]
+    fn backfill_stores_leaves_an_already_known_store_alone() {
+        let mut game = sample_game("Game.exe");
+        game.folder_path = "C:\\Games\\NotSteamAnymore".into();
+        game.store = Some(crate::launch::Store::Steam);
+        let mut catalog = Catalog::default();
+        catalog.games.push(game);
+
+        backfill_stores(&mut catalog);
+
+        assert_eq!(catalog.games[0].store, Some(crate::launch::Store::Steam));
     }
 
     #[test]
