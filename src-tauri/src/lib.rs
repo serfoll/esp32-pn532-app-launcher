@@ -58,6 +58,8 @@ pub fn run() {
             commands::get_reader_state,
             commands::resolve_close_prompt,
             commands::flash_firmware,
+            commands::list_usb_serial_ports,
+            commands::pair_reader_device,
         ])
         .setup(|app| {
             let flashing = app.state::<Arc<AtomicBool>>().inner().clone();

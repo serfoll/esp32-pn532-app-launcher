@@ -14,6 +14,7 @@ import type {
   Game,
   ScanCandidate,
   SyncResult,
+  UsbSerialPortInfo,
 } from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
@@ -190,6 +191,85 @@ function showConfirmDialog(options: {
   })
 }
 
+// Mirrors flash::DEFAULT_READER_USB_VID/PID (Rust) -- used client-side only
+// to decide whether the currently-connected device already matches the
+// trusted one, without a round-trip just to ask. The backend is still the
+// actual authority: it applies this same fallback itself when
+// Settings.readerUsbVid/Pid is unset.
+const DEFAULT_READER_VID = 0x1a86
+const DEFAULT_READER_PID = 0x7523
+
+const pairReaderDialog = document.querySelector<HTMLDialogElement>('#pair-reader-dialog')!
+const pairReaderSelect = document.querySelector<HTMLSelectElement>('#pair-reader-select')!
+const pairReaderConfirmBtn = document.querySelector<HTMLButtonElement>(
+  '#pair-reader-confirm',
+)!
+
+/** Lets the user confirm which connected USB serial device is their
+ * reader, persisting the choice via pair_reader_device. Resolves true
+ * only if a device was actually confirmed and paired -- false for Cancel,
+ * Escape, or a pairing call that failed. */
+function showPairReaderDialog(ports: UsbSerialPortInfo[]): Promise<boolean> {
+  pairReaderSelect.innerHTML = ''
+  for (const port of ports) {
+    const option = document.createElement('option')
+    option.value = `${port.vid}:${port.pid}`
+    option.textContent = `${port.description} (${port.portName})`
+    pairReaderSelect.appendChild(option)
+  }
+
+  pairReaderDialog.returnValue = ''
+  if (pairReaderDialog.open) pairReaderDialog.close()
+  pairReaderDialog.showModal()
+
+  return new Promise((resolve) => {
+    pairReaderDialog.addEventListener(
+      'close',
+      async () => {
+        if (pairReaderDialog.returnValue !== 'confirmed') {
+          resolve(false)
+          return
+        }
+        const [vid, pid] = pairReaderSelect.value.split(':').map(Number)
+        const result = await invokeOrAlert<Catalog>('pair_reader_device', { vid, pid })
+        if (!result) {
+          resolve(false)
+          return
+        }
+        catalog = result
+        log(`Paired reader device: USB ${vid.toString(16)}:${pid.toString(16)}`)
+        resolve(true)
+      },
+      { once: true },
+    )
+  })
+}
+
+pairReaderConfirmBtn.addEventListener('click', () => {
+  if (pairReaderSelect.value) pairReaderDialog.close('confirmed')
+})
+
+/** Checks the currently-connected USB serial device (if any) against the
+ * trusted reader identity (Settings.readerUsbVid/Pid, or the built-in
+ * default before anything's paired) and, on a mismatch, offers the
+ * pairing dialog before letting a flash proceed. Resolves true if it's
+ * safe to continue (already trusted, nothing connected to check yet, or
+ * newly confirmed via the dialog); false if the user cancelled. */
+async function checkReaderPairing(): Promise<boolean> {
+  const ports = await invokeOrAlert<UsbSerialPortInfo[]>('list_usb_serial_ports')
+  if (!ports || ports.length === 0) return true // nothing connected -- let flash_firmware's own error explain that
+
+  // Same "first USB serial device found" heuristic as find_reader_port
+  // (Rust) -- this app targets one board at a time, so there's normally
+  // only one candidate anyway.
+  const candidate = ports[0]
+  const trustedVid = catalog.settings.readerUsbVid ?? DEFAULT_READER_VID
+  const trustedPid = catalog.settings.readerUsbPid ?? DEFAULT_READER_PID
+  if (candidate.vid === trustedVid && candidate.pid === trustedPid) return true
+
+  return showPairReaderDialog(ports)
+}
+
 const READER_STATUS_LABEL: Record<string, string> = {
   disconnected: 'Reader: disconnected',
   connectedUnknownFirmware: 'Reader: connected, needs firmware update',
@@ -203,6 +283,12 @@ function updateReaderStatus(state: string): void {
 }
 
 async function handleFlashFirmware(): Promise<void> {
+  const paired = await checkReaderPairing()
+  if (!paired) {
+    log('Firmware flash cancelled: device not paired')
+    return
+  }
+
   const proceed = await showConfirmDialog({
     title: 'Flash firmware?',
     message: "This writes the app's bundled firmware to the connected board. Don't unplug it during the process.",
@@ -502,6 +588,11 @@ async function handleToggleSyncOnStartup(value: boolean): Promise<void> {
 // settings field would risk drifting out of sync with it (e.g. if the
 // user removes the startup entry via Windows' own Settings app).
 async function handleToggleLaunchOnStartup(value: boolean): Promise<void> {
+  // Disabled for the round-trip so two quick toggles can't race and leave
+  // the OS registration disagreeing with whichever finished last -- the
+  // checkbox itself is the only feedback of the real state here (nothing
+  // in catalog.json to re-sync from), so it needs to stay trustworthy.
+  launchOnStartupCheckbox.disabled = true
   try {
     if (value) {
       await enableAutostart()
@@ -512,6 +603,8 @@ async function handleToggleLaunchOnStartup(value: boolean): Promise<void> {
     log(`Failed to ${value ? 'enable' : 'disable'} launch on startup: ${e}`)
     showToast(`Couldn't ${value ? 'enable' : 'disable'} launch on startup.`)
     launchOnStartupCheckbox.checked = !value // reflects reality: the change didn't take
+  } finally {
+    launchOnStartupCheckbox.disabled = false
   }
 }
 
@@ -1014,7 +1107,14 @@ window.addEventListener('DOMContentLoaded', () => {
   // few seconds for a large library; they only need the initial catalog
   // load, not the sync that may follow it.
   loadCatalog().then(() => {
-    if (catalog && catalog.settings.syncOnStartup) handleSyncLibrary()
+    if (!catalog) return
+    if (catalog.settings.syncOnStartup) handleSyncLibrary()
+    // checkReaderPairing only ever prompts on an actual mismatch (nothing
+    // paired yet + a non-default device connected, or a paired device
+    // that's since changed) -- covers "first launch ever" and "a new
+    // board was just connected" the same way, without a separate
+    // first-run flag to track.
+    checkReaderPairing()
   })
   loadReaderState()
   pollRunningGames()

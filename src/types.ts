@@ -5,6 +5,8 @@ export interface Settings {
   closeBehavior: "ask" | "minimize" | "quit";
   showStoreBadges: boolean;
   syncOnStartup: boolean;
+  readerUsbVid: number | null;
+  readerUsbPid: number | null;
 }
 
 export type Store = "steam";
@@ -56,3 +58,10 @@ export type FlashProgressPayload =
   | { stage: "writing"; current: number; total: number }
   | { stage: "verifying" }
   | { stage: "done" };
+
+export interface UsbSerialPortInfo {
+  portName: string;
+  vid: number;
+  pid: number;
+  description: string;
+}

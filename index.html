@@ -211,6 +211,23 @@
       </form>
     </dialog>
 
+    <dialog id="pair-reader-dialog">
+      <form method="dialog">
+        <div class="dialog-header">
+          <h2>Select your reader</h2>
+          <button type="submit" class="dialog-close" aria-label="Cancel">&#10005;</button>
+        </div>
+        <p class="settings-field-hint">
+          This device wasn't recognized as your reader. Pick which connected device it is, and you won't be asked again.
+        </p>
+        <select id="pair-reader-select"></select>
+        <menu>
+          <button id="pair-reader-confirm" type="button">Confirm</button>
+          <button type="submit">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="launch-error-dialog">
       <form method="dialog">
         <h2>Couldn't launch game</h2>
