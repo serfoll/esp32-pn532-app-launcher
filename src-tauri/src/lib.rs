@@ -1,11 +1,13 @@
 pub mod catalog;
 mod commands;
+pub mod flash;
 pub mod launch;
 pub mod scan;
 pub mod serial;
 
 use serial::{ReaderState, WatchdogEvent};
-use std::sync::Mutex;
+use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, Mutex};
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
@@ -31,7 +33,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(Mutex::new(ReaderState::Disconnected))
+        .manage(Arc::new(AtomicBool::new(false)))
         .invoke_handler(tauri::generate_handler![
             commands::get_catalog,
             commands::scan_folder,
@@ -50,11 +57,15 @@ pub fn run() {
             commands::get_running_games,
             commands::get_reader_state,
             commands::resolve_close_prompt,
+            commands::flash_firmware,
+            commands::list_usb_serial_ports,
+            commands::pair_reader_device,
         ])
         .setup(|app| {
+            let flashing = app.state::<Arc<AtomicBool>>().inner().clone();
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                serial::run_watchdog(move |event| match event {
+                serial::run_watchdog(flashing, move |event| match event {
                     WatchdogEvent::State(state) => {
                         *handle.state::<Mutex<ReaderState>>().lock().unwrap() = state;
                         let _ = handle.emit("reader-state", state.as_str());

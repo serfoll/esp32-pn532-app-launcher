@@ -15,6 +15,11 @@ dist-ssr
 *.local
 .env
 
+# arduino-cli's compile cache, left next to the sketch when compiling
+# without an explicit --build-path -- the shipped firmware binary lives at
+# src-tauri/firmware/RFIDCART_FW_v1.bin instead, not this scratch output.
+sketch_jul20a/build/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

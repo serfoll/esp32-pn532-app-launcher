@@ -30,6 +30,9 @@
 
     <header class="app-header">
       <span id="reader-status" class="reader-status reader-status--disconnected">Reader: disconnected</span>
+      <button id="flash-firmware-button" type="button" class="flash-firmware-button" hidden>
+        Flash firmware...
+      </button>
       <nav>
         <a href="#" id="nav-gallery" class="nav-link">Gallery</a>
         <a href="#" id="nav-bindings" class="nav-link">Tag Bindings</a>
@@ -108,6 +111,16 @@
                   Automatically rescan your library folders for new games each time the app opens.
                 </p>
               </div>
+
+              <div class="settings-field">
+                <label class="settings-checkbox-row">
+                  <input type="checkbox" id="launch-on-startup-checkbox" />
+                  Launch on startup
+                </label>
+                <p class="settings-field-hint">
+                  Start Cart Reader automatically when you log in to Windows, so it's already watching the reader.
+                </p>
+              </div>
             </section>
 
             <section id="settings-panel-game" class="settings-panel" hidden>
@@ -121,6 +134,12 @@
                 <input id="simulate-tag-input" placeholder="Tag UID, e.g. 04A3B2C1" />
                 <button id="simulate-tag-button" type="button">Trigger insert</button>
               </div>
+
+              <h3>Flash firmware</h3>
+              <p class="settings-field-hint">
+                Flashes the bundled firmware regardless of what the reader currently reports, for testing the flash itself.
+              </p>
+              <button id="dev-flash-firmware-button" type="button">Flash firmware...</button>
             </section>
           </div>
         </div>
@@ -178,7 +197,7 @@
 
     <dialog id="progress-dialog">
       <h2 id="progress-dialog-message"></h2>
-      <progress></progress>
+      <progress id="progress-dialog-bar"></progress>
     </dialog>
 
     <dialog id="confirm-dialog">
@@ -187,6 +206,23 @@
         <p id="confirm-dialog-message" hidden></p>
         <menu>
           <button id="confirm-dialog-confirm" type="button"></button>
+          <button type="submit">Cancel</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="pair-reader-dialog">
+      <form method="dialog">
+        <div class="dialog-header">
+          <h2>Select your reader</h2>
+          <button type="submit" class="dialog-close" aria-label="Cancel">&#10005;</button>
+        </div>
+        <p class="settings-field-hint">
+          This device wasn't recognized as your reader. Pick which connected device it is, and you won't be asked again.
+        </p>
+        <select id="pair-reader-select"></select>
+        <menu>
+          <button id="pair-reader-confirm" type="button">Confirm</button>
           <button type="submit">Cancel</button>
         </menu>
       </form>

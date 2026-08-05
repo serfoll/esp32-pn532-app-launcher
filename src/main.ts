@@ -2,7 +2,20 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { Catalog, ConfirmResult, Game, ScanCandidate, SyncResult } from './types'
+import {
+  enable as enableAutostart,
+  disable as disableAutostart,
+  isEnabled as isAutostartEnabled,
+} from '@tauri-apps/plugin-autostart'
+import type {
+  Catalog,
+  ConfirmResult,
+  FlashProgressPayload,
+  Game,
+  ScanCandidate,
+  SyncResult,
+  UsbSerialPortInfo,
+} from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
 import { renderSettings } from './settings/settings'
@@ -21,6 +34,9 @@ const navGallery = document.querySelector<HTMLAnchorElement>('#nav-gallery')!
 const navBindings = document.querySelector<HTMLAnchorElement>('#nav-bindings')!
 const toastContainerEl = document.querySelector<HTMLElement>('#toast-container')!
 const readerStatusEl = document.querySelector<HTMLElement>('#reader-status')!
+const flashFirmwareButton = document.querySelector<HTMLButtonElement>(
+  '#flash-firmware-button',
+)!
 
 const appMenuToggle =
   document.querySelector<HTMLButtonElement>('#app-menu-toggle')!
@@ -61,11 +77,17 @@ const showStoreBadgesCheckbox = document.querySelector<HTMLInputElement>(
 const syncOnStartupCheckbox = document.querySelector<HTMLInputElement>(
   '#sync-on-startup-checkbox',
 )!
+const launchOnStartupCheckbox = document.querySelector<HTMLInputElement>(
+  '#launch-on-startup-checkbox',
+)!
 const simulateInput = document.querySelector<HTMLInputElement>(
   '#simulate-tag-input',
 )!
 const simulateBtn = document.querySelector<HTMLButtonElement>(
   '#simulate-tag-button',
+)!
+const devFlashFirmwareButton = document.querySelector<HTMLButtonElement>(
+  '#dev-flash-firmware-button',
 )!
 
 const syncLibraryButton = document.querySelector<HTMLButtonElement>(
@@ -118,6 +140,9 @@ const progressDialog = document.querySelector<HTMLDialogElement>(
 const progressDialogMessageEl = document.querySelector<HTMLElement>(
   '#progress-dialog-message',
 )!
+const progressDialogBarEl = document.querySelector<HTMLProgressElement>(
+  '#progress-dialog-bar',
+)!
 // No close button (nothing to cancel -- the underlying command has no
 // abort mechanism and keeps running either way) means Escape shouldn't be
 // able to dismiss it either; a <dialog> still fires 'cancel' on Escape
@@ -166,6 +191,85 @@ function showConfirmDialog(options: {
   })
 }
 
+// Mirrors flash::DEFAULT_READER_USB_VID/PID (Rust) -- used client-side only
+// to decide whether the currently-connected device already matches the
+// trusted one, without a round-trip just to ask. The backend is still the
+// actual authority: it applies this same fallback itself when
+// Settings.readerUsbVid/Pid is unset.
+const DEFAULT_READER_VID = 0x1a86
+const DEFAULT_READER_PID = 0x7523
+
+const pairReaderDialog = document.querySelector<HTMLDialogElement>('#pair-reader-dialog')!
+const pairReaderSelect = document.querySelector<HTMLSelectElement>('#pair-reader-select')!
+const pairReaderConfirmBtn = document.querySelector<HTMLButtonElement>(
+  '#pair-reader-confirm',
+)!
+
+/** Lets the user confirm which connected USB serial device is their
+ * reader, persisting the choice via pair_reader_device. Resolves true
+ * only if a device was actually confirmed and paired -- false for Cancel,
+ * Escape, or a pairing call that failed. */
+function showPairReaderDialog(ports: UsbSerialPortInfo[]): Promise<boolean> {
+  pairReaderSelect.innerHTML = ''
+  for (const port of ports) {
+    const option = document.createElement('option')
+    option.value = `${port.vid}:${port.pid}`
+    option.textContent = `${port.description} (${port.portName})`
+    pairReaderSelect.appendChild(option)
+  }
+
+  pairReaderDialog.returnValue = ''
+  if (pairReaderDialog.open) pairReaderDialog.close()
+  pairReaderDialog.showModal()
+
+  return new Promise((resolve) => {
+    pairReaderDialog.addEventListener(
+      'close',
+      async () => {
+        if (pairReaderDialog.returnValue !== 'confirmed') {
+          resolve(false)
+          return
+        }
+        const [vid, pid] = pairReaderSelect.value.split(':').map(Number)
+        const result = await invokeOrAlert<Catalog>('pair_reader_device', { vid, pid })
+        if (!result) {
+          resolve(false)
+          return
+        }
+        catalog = result
+        log(`Paired reader device: USB ${vid.toString(16)}:${pid.toString(16)}`)
+        resolve(true)
+      },
+      { once: true },
+    )
+  })
+}
+
+pairReaderConfirmBtn.addEventListener('click', () => {
+  if (pairReaderSelect.value) pairReaderDialog.close('confirmed')
+})
+
+/** Checks the currently-connected USB serial device (if any) against the
+ * trusted reader identity (Settings.readerUsbVid/Pid, or the built-in
+ * default before anything's paired) and, on a mismatch, offers the
+ * pairing dialog before letting a flash proceed. Resolves true if it's
+ * safe to continue (already trusted, nothing connected to check yet, or
+ * newly confirmed via the dialog); false if the user cancelled. */
+async function checkReaderPairing(): Promise<boolean> {
+  const ports = await invokeOrAlert<UsbSerialPortInfo[]>('list_usb_serial_ports')
+  if (!ports || ports.length === 0) return true // nothing connected -- let flash_firmware's own error explain that
+
+  // Same "first USB serial device found" heuristic as find_reader_port
+  // (Rust) -- this app targets one board at a time, so there's normally
+  // only one candidate anyway.
+  const candidate = ports[0]
+  const trustedVid = catalog.settings.readerUsbVid ?? DEFAULT_READER_VID
+  const trustedPid = catalog.settings.readerUsbPid ?? DEFAULT_READER_PID
+  if (candidate.vid === trustedVid && candidate.pid === trustedPid) return true
+
+  return showPairReaderDialog(ports)
+}
+
 const READER_STATUS_LABEL: Record<string, string> = {
   disconnected: 'Reader: disconnected',
   connectedUnknownFirmware: 'Reader: connected, needs firmware update',
@@ -175,6 +279,34 @@ const READER_STATUS_LABEL: Record<string, string> = {
 function updateReaderStatus(state: string): void {
   readerStatusEl.textContent = READER_STATUS_LABEL[state] ?? `Reader: ${state}`
   readerStatusEl.className = `reader-status reader-status--${state}`
+  flashFirmwareButton.hidden = state !== 'connectedUnknownFirmware'
+}
+
+async function handleFlashFirmware(): Promise<void> {
+  const paired = await checkReaderPairing()
+  if (!paired) {
+    log('Firmware flash cancelled: device not paired')
+    return
+  }
+
+  const proceed = await showConfirmDialog({
+    title: 'Flash firmware?',
+    message: "This writes the app's bundled firmware to the connected board. Don't unplug it during the process.",
+    confirmLabel: 'Flash',
+  })
+  if (!proceed) {
+    log('Firmware flash cancelled at confirm prompt')
+    return
+  }
+
+  lastFlashStage = null
+  showProgressDialog('Flashing firmware... this can take a couple of minutes.')
+  const result = await invokeOrAlert<null>('flash_firmware')
+  progressDialog.close()
+  if (result === undefined) return // invokeOrAlert already surfaced the error
+
+  log('Firmware flashed successfully')
+  showToast('Firmware flashed.')
 }
 
 const TOAST_AUTO_DISMISS_MS = 5000
@@ -210,6 +342,11 @@ function showToast(message: string): void {
 function showProgressDialog(message: string): void {
   if (progressDialog.open) progressDialog.close()
   progressDialogMessageEl.textContent = message
+  // Indeterminate by default -- only flash-progress events (see below)
+  // turn this into a real percentage bar, and a stale value from a
+  // previous flash shouldn't leak into some other operation's dialog.
+  progressDialogBarEl.removeAttribute('value')
+  progressDialogBarEl.removeAttribute('max')
   progressDialog.showModal()
 }
 
@@ -444,6 +581,31 @@ async function handleToggleShowStoreBadges(value: boolean): Promise<void> {
 
 async function handleToggleSyncOnStartup(value: boolean): Promise<void> {
   await updateSettings({ syncOnStartup: value })
+}
+
+// Not stored in catalog.json -- the OS registration (registry Run key)
+// is its own persistent source of truth, and duplicating it as a
+// settings field would risk drifting out of sync with it (e.g. if the
+// user removes the startup entry via Windows' own Settings app).
+async function handleToggleLaunchOnStartup(value: boolean): Promise<void> {
+  // Disabled for the round-trip so two quick toggles can't race and leave
+  // the OS registration disagreeing with whichever finished last -- the
+  // checkbox itself is the only feedback of the real state here (nothing
+  // in catalog.json to re-sync from), so it needs to stay trustworthy.
+  launchOnStartupCheckbox.disabled = true
+  try {
+    if (value) {
+      await enableAutostart()
+    } else {
+      await disableAutostart()
+    }
+  } catch (e) {
+    log(`Failed to ${value ? 'enable' : 'disable'} launch on startup: ${e}`)
+    showToast(`Couldn't ${value ? 'enable' : 'disable'} launch on startup.`)
+    launchOnStartupCheckbox.checked = !value // reflects reality: the change didn't take
+  } finally {
+    launchOnStartupCheckbox.disabled = false
+  }
 }
 
 async function handleToggleShowOutputLog(value: boolean): Promise<void> {
@@ -748,6 +910,7 @@ function triggerSimulatedTagEvent(): void {
 }
 
 syncLibraryButton.addEventListener('click', () => handleSyncLibrary())
+flashFirmwareButton.addEventListener('click', () => handleFlashFirmware())
 
 bindConfirmBtn.addEventListener('click', async () => {
   const gameId = bindSelect.value
@@ -767,6 +930,7 @@ bindConfirmBtn.addEventListener('click', async () => {
 })
 
 simulateBtn.addEventListener('click', triggerSimulatedTagEvent)
+devFlashFirmwareButton.addEventListener('click', () => handleFlashFirmware())
 simulateInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault()
@@ -794,9 +958,10 @@ navBindings.addEventListener('click', (e) => {
 appMenuToggle.addEventListener('click', () => {
   appMenuEl.hidden = !appMenuEl.hidden
 })
-menuSettingsBtn.addEventListener('click', () => {
+menuSettingsBtn.addEventListener('click', async () => {
   hideAppMenu()
   showSettingsSection('general')
+  launchOnStartupCheckbox.checked = await isAutostartEnabled().catch(() => false)
   settingsDialog.showModal()
 })
 menuLogsCheckbox.addEventListener('change', () =>
@@ -819,6 +984,9 @@ showStoreBadgesCheckbox.addEventListener('change', () =>
 )
 syncOnStartupCheckbox.addEventListener('change', () =>
   handleToggleSyncOnStartup(syncOnStartupCheckbox.checked),
+)
+launchOnStartupCheckbox.addEventListener('change', () =>
+  handleToggleLaunchOnStartup(launchOnStartupCheckbox.checked),
 )
 
 // The Dev section only makes sense against a running dev server -- a
@@ -884,6 +1052,28 @@ listen<string>('reader-error', (event) => {
   showToast(`Reader: ${event.payload}`)
   log(`Reader error: ${event.payload}`)
 })
+// One flash-progress event per espflash callback (init/update/verifying/
+// finish) -- 'writing' fires often (once per chunk written), so only its
+// first occurrence gets logged to the output log; the running percentage
+// goes to the progress dialog instead, which is meant to update rapidly.
+let lastFlashStage: FlashProgressPayload['stage'] | null = null
+listen<FlashProgressPayload>('flash-progress', (event) => {
+  const progress = event.payload
+  if (progress.stage === 'writing') {
+    progressDialogBarEl.max = progress.total
+    progressDialogBarEl.value = progress.current
+    const percent = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : 0
+    progressDialogMessageEl.textContent = `Flashing firmware... ${percent}%`
+    if (lastFlashStage !== 'writing') log('Writing firmware to the board...')
+  } else if (progress.stage === 'verifying') {
+    progressDialogBarEl.removeAttribute('value')
+    progressDialogBarEl.removeAttribute('max')
+    progressDialogMessageEl.textContent = 'Verifying flash...'
+    log('Verifying flash...')
+  }
+  lastFlashStage = progress.stage
+})
+
 listen('close-requested', () => closePromptDialog.showModal())
 
 // Escape fires the dialog's native 'cancel' event, which would dismiss it
@@ -917,7 +1107,14 @@ window.addEventListener('DOMContentLoaded', () => {
   // few seconds for a large library; they only need the initial catalog
   // load, not the sync that may follow it.
   loadCatalog().then(() => {
-    if (catalog && catalog.settings.syncOnStartup) handleSyncLibrary()
+    if (!catalog) return
+    if (catalog.settings.syncOnStartup) handleSyncLibrary()
+    // checkReaderPairing only ever prompts on an actual mismatch (nothing
+    // paired yet + a non-default device connected, or a paired device
+    // that's since changed) -- covers "first launch ever" and "a new
+    // board was just connected" the same way, without a separate
+    // first-run flag to track.
+    checkReaderPairing()
   })
   loadReaderState()
   pollRunningGames()

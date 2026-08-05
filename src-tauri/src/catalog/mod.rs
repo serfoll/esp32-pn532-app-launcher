@@ -71,6 +71,14 @@ pub struct Settings {
     // usual missing-bool-is-false.
     #[serde(default = "default_true")]
     pub sync_on_startup: bool,
+    // Trust-on-first-use device pairing for flashing: unset (missing or
+    // null, both covered by #[serde(default)] on an Option) means "not
+    // paired yet" -- flash::flash_firmware falls back to its own default
+    // VID/PID until the user confirms a device via the pairing dialog.
+    #[serde(default)]
+    pub reader_usb_vid: Option<u16>,
+    #[serde(default)]
+    pub reader_usb_pid: Option<u16>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -122,6 +130,8 @@ impl Default for Catalog {
                 close_behavior: CloseBehavior::Ask,
                 show_store_badges: true,
                 sync_on_startup: true,
+                reader_usb_vid: None,
+                reader_usb_pid: None,
             },
             games: Vec::new(),
             bindings: Vec::new(),
@@ -572,6 +582,22 @@ mod tests {
         fs::remove_file(&path).ok();
 
         assert!(loaded.settings.sync_on_startup);
+    }
+
+    #[test]
+    fn loads_pre_reader_pairing_catalog_with_vid_pid_defaulted_none() {
+        let path = temp_path("legacy_reader_pairing_schema");
+        fs::write(
+            &path,
+            r#"{"version":1,"settings":{"rootFolders":[],"confirmBeforeLaunch":false,"showOutputLog":false,"showStoreBadges":true,"syncOnStartup":true},"games":[],"bindings":[]}"#,
+        )
+        .unwrap();
+
+        let loaded = load(&path).expect("catalog written before reader pairing existed should still load");
+        fs::remove_file(&path).ok();
+
+        assert_eq!(loaded.settings.reader_usb_vid, None);
+        assert_eq!(loaded.settings.reader_usb_pid, None);
     }
 
     #[test]

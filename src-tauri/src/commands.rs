@@ -7,7 +7,7 @@ use crate::serial::ReaderState;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 // pub(crate): lib.rs's window close-event handler needs to read/write the
 // close_behavior setting without going through a full Tauri command.
@@ -313,6 +313,176 @@ pub fn update_settings(
 #[tauri::command]
 pub fn get_reader_state(state: State<'_, Mutex<ReaderState>>) -> String {
     state.lock().unwrap().as_str().to_string()
+}
+
+/// Progress events emitted to the frontend as `flash-progress` while a
+/// flash is underway -- internally tagged so the JSON payload is
+/// `{"stage":"writing","current":N,"total":N}` / `{"stage":"verifying"}` /
+/// `{"stage":"done"}`, one flat shape the frontend can switch on directly.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "stage", rename_all = "camelCase")]
+enum FlashProgress {
+    Writing { current: usize, total: usize },
+    Verifying,
+    Done,
+}
+
+/// Forwards espflash's progress callbacks to the frontend as Tauri events
+/// instead of the crate's own (terminal-only) default reporting, so the
+/// app's progress dialog can show real percentage rather than a static
+/// indeterminate bar, and the output log can show real stage transitions
+/// instead of nothing at all for the whole multi-minute operation.
+struct TauriProgress {
+    app: AppHandle,
+    total: usize,
+}
+
+impl TauriProgress {
+    fn new(app: AppHandle) -> Self {
+        Self { app, total: 0 }
+    }
+
+    fn emit(&self, progress: FlashProgress) {
+        let _ = self.app.emit("flash-progress", progress);
+    }
+}
+
+impl espflash::target::ProgressCallbacks for TauriProgress {
+    fn init(&mut self, _addr: u32, total: usize) {
+        self.total = total;
+        self.emit(FlashProgress::Writing { current: 0, total });
+    }
+
+    fn update(&mut self, current: usize) {
+        self.emit(FlashProgress::Writing { current, total: self.total });
+    }
+
+    fn verifying(&mut self) {
+        self.emit(FlashProgress::Verifying);
+    }
+
+    fn finish(&mut self, _skipped: bool) {
+        self.emit(FlashProgress::Done);
+    }
+}
+
+/// Flashes the app's bundled firmware to the currently-connected reader.
+/// Sets the shared `flashing` flag around the (blocking, can take a
+/// couple of minutes) flash operation so the watchdog thread steps aside
+/// instead of fighting it for the port -- see `serial::run_watchdog`'s
+/// doc comment.
+///
+/// `async` + `spawn_blocking`, not a plain blocking `fn` -- Tauri runs
+/// non-async commands on the *main* thread by default, which froze the
+/// whole window for the entire flash (confirmed live: title bar showed
+/// "Not Responding"). spawn_blocking moves the actual blocking espflash
+/// work onto its own dedicated thread instead.
+#[tauri::command]
+pub async fn flash_firmware(
+    app: AppHandle,
+    flashing: State<'_, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+) -> Result<(), String> {
+    // Acquired before the port lookup, and held across the whole spawned
+    // task via the .await below -- two concurrent invocations (e.g. the
+    // header button and the dev-only test button, both clickable in a
+    // dev build) would otherwise both proceed and contend for the same
+    // port mid-write, which could corrupt an in-progress, non-idempotent
+    // firmware write.
+    let _guard = FlashingGuard::try_new(flashing.inner().clone())?;
+
+    let port = crate::serial::find_reader_port()
+        .ok_or_else(|| "No reader connected -- plug in the board first".to_string())?;
+
+    // Falls back to the built-in default until the user pairs a specific
+    // device (see pair_reader_device) -- covers the common case (this
+    // exact board) without needing pairing to happen first.
+    let catalog = load_catalog(&app)?;
+    let expected_vid = catalog.settings.reader_usb_vid.unwrap_or(crate::flash::DEFAULT_READER_USB_VID);
+    let expected_pid = catalog.settings.reader_usb_pid.unwrap_or(crate::flash::DEFAULT_READER_USB_PID);
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut progress = TauriProgress::new(app);
+        crate::flash::flash_firmware(&port, expected_vid, expected_pid, &mut progress)
+    })
+    .await
+    .map_err(|e| format!("flash task panicked: {e}"))?
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsbSerialPortInfo {
+    pub port_name: String,
+    pub vid: u16,
+    pub pid: u16,
+    pub description: String,
+}
+
+/// Lists every currently-connected USB serial device, for the reader
+/// pairing dialog -- a mismatch between the connected device and
+/// `Settings.readerUsbVid`/`Pid` (or the built-in default) is what sends
+/// the frontend here in the first place, so the user can confirm which
+/// one is actually their reader.
+#[tauri::command]
+pub fn list_usb_serial_ports() -> Result<Vec<UsbSerialPortInfo>, String> {
+    Ok(serialport::available_ports()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|p| match p.port_type {
+            serialport::SerialPortType::UsbPort(info) => Some(UsbSerialPortInfo {
+                port_name: p.port_name,
+                vid: info.vid,
+                pid: info.pid,
+                description: info
+                    .product
+                    .clone()
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| info.manufacturer.clone())
+                    .unwrap_or_else(|| format!("USB {:04X}:{:04X}", info.vid, info.pid)),
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
+/// Persists the user's confirmed reader device from the pairing dialog.
+/// Trust-on-first-use: once paired, `flash_firmware` only accepts this
+/// exact VID/PID instead of the built-in default.
+#[tauri::command]
+pub fn pair_reader_device(app: AppHandle, vid: u16, pid: u16) -> Result<Catalog, String> {
+    let mut catalog = load_catalog(&app)?;
+    catalog.settings.reader_usb_vid = Some(vid);
+    catalog.settings.reader_usb_pid = Some(pid);
+    save_catalog(&app, &catalog)?;
+    Ok(catalog)
+}
+
+/// Exclusively claims `flashing` for its lifetime (fails rather than
+/// overwriting an already-true flag) and always sets it back to false on
+/// drop -- unlike a plain store/call/store, this still resets it if
+/// `flash::flash_firmware` panics partway through, which a bare pair of
+/// statements wouldn't: the second store would simply never run, leaving
+/// the watchdog thread paused forever with no way to recover short of
+/// restarting the app. Owns the Arc (rather than borrowing) so it can move
+/// into the spawn_blocking closure above, which requires 'static.
+struct FlashingGuard(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl FlashingGuard {
+    fn try_new(flag: std::sync::Arc<std::sync::atomic::AtomicBool>) -> Result<Self, String> {
+        flag.compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::Acquire,
+            std::sync::atomic::Ordering::Relaxed,
+        )
+        .map_err(|_| "Firmware flash already in progress".to_string())?;
+        Ok(Self(flag))
+    }
+}
+
+impl Drop for FlashingGuard {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
 }
 
 /// Launches a game, preferring its launcher's own protocol handler over a
