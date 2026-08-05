@@ -4,7 +4,6 @@ import type { Settings } from "../types";
 export interface SettingsHandlers {
   onAddFolder: (path: string) => void;
   onRemoveFolder: (path: string) => void;
-  onToggleConfirmBeforeLaunch: (value: boolean) => void;
   onRefreshArtwork: () => void;
 }
 
@@ -14,11 +13,6 @@ export function renderSettings(
   handlers: SettingsHandlers,
 ): void {
   container.innerHTML = "";
-
-  const folderSection = document.createElement("section");
-  const heading = document.createElement("h2");
-  heading.textContent = "Root folders";
-  folderSection.appendChild(heading);
 
   const list = document.createElement("ul");
   list.className = "root-folder-list";
@@ -37,7 +31,7 @@ export function renderSettings(
 
     list.appendChild(item);
   }
-  folderSection.appendChild(list);
+  container.appendChild(list);
 
   const form = document.createElement("form");
   form.className = "add-folder-form";
@@ -67,28 +61,12 @@ export function renderSettings(
       input.value = "";
     }
   });
-  folderSection.appendChild(form);
-  container.appendChild(folderSection);
+  container.appendChild(form);
 
-  const launchSection = document.createElement("section");
-  const label = document.createElement("label");
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = settings.confirmBeforeLaunch;
-  checkbox.addEventListener("change", () =>
-    handlers.onToggleConfirmBeforeLaunch(checkbox.checked),
-  );
-  label.appendChild(checkbox);
-  label.append(" Confirm before launch");
-  launchSection.appendChild(label);
-  container.appendChild(launchSection);
-
-  const artworkSection = document.createElement("section");
   const refreshButton = document.createElement("button");
   refreshButton.type = "button";
   refreshButton.textContent = "Refresh artwork";
   refreshButton.title = "Re-fetch artwork for every game, including ones added before an artwork source was set up";
   refreshButton.addEventListener("click", () => handlers.onRefreshArtwork());
-  artworkSection.appendChild(refreshButton);
-  container.appendChild(artworkSection);
+  container.appendChild(refreshButton);
 }

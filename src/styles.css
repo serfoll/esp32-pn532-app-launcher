@@ -1,4 +1,6 @@
 :root {
+  --titlebar-height: 34px;
+
   font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 24px;
@@ -22,7 +24,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 34px;
+  height: var(--titlebar-height);
   background-color: rgba(0, 0, 0, 0.15);
   user-select: none;
 }
@@ -309,16 +311,25 @@ button:active {
   border-top: 1px dashed rgba(0, 0, 0, 0.2);
 }
 
+/* Dialogs default to centering across the whole viewport, which lets them
+   render on top of the custom titlebar -- offsetting both the dialog and
+   its backdrop below --titlebar-height keeps the titlebar visible and its
+   window controls usable while a dialog is open. */
 dialog {
+  position: fixed;
+  top: var(--titlebar-height);
   border: none;
   border-radius: 8px;
   padding: 1.5em;
   color: inherit;
   background-color: #f6f6f6;
   min-width: 320px;
+  max-height: calc(100vh - var(--titlebar-height) - 3em);
+  overflow: auto;
 }
 
 dialog::backdrop {
+  top: var(--titlebar-height);
   background-color: rgba(0, 0, 0, 0.4);
 }
 
@@ -327,6 +338,50 @@ dialog menu {
   gap: 0.5em;
   padding: 0;
   margin: 1em 0 0;
+}
+
+.settings-layout {
+  display: flex;
+  gap: 1.5em;
+  min-width: 480px;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  flex-shrink: 0;
+  min-width: 8em;
+}
+
+.settings-nav-item {
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 6px;
+  text-align: left;
+  padding: 0.5em 0.75em;
+  color: inherit;
+  font-weight: 500;
+}
+
+.settings-nav-item:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+}
+
+.settings-nav-item.active {
+  background-color: rgba(57, 108, 216, 0.15);
+}
+
+.settings-panels {
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-checkbox-row {
+  display: block;
+  margin-top: 1em;
 }
 
 .edit-game-actions {
@@ -386,7 +441,8 @@ dialog menu {
   }
 
   .dropdown-menu button:hover,
-  .dropdown-menu-checkbox:hover {
+  .dropdown-menu-checkbox:hover,
+  .settings-nav-item:hover {
     background-color: rgba(255, 255, 255, 0.1);
   }
 

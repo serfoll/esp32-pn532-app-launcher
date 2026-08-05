@@ -47,8 +47,18 @@ const appWindow = getCurrentWindow()
 
 const settingsDialog =
   document.querySelector<HTMLDialogElement>('#settings-dialog')!
+let settingsNavItems = document.querySelectorAll<HTMLButtonElement>(
+  '.settings-nav-item',
+)
+const settingsNavDev =
+  document.querySelector<HTMLButtonElement>('#settings-nav-dev')!
+const settingsPanelDev =
+  document.querySelector<HTMLElement>('#settings-panel-dev')!
 const closeBehaviorSelect = document.querySelector<HTMLSelectElement>(
   '#close-behavior-select',
+)!
+const confirmBeforeLaunchCheckbox = document.querySelector<HTMLInputElement>(
+  '#confirm-before-launch-checkbox',
 )!
 const simulateInput = document.querySelector<HTMLInputElement>(
   '#simulate-tag-input',
@@ -148,14 +158,23 @@ function showView(name: 'gallery' | 'bindings'): void {
   navBindings.classList.toggle('active', name === 'bindings')
 }
 
+function showSettingsSection(name: 'general' | 'game' | 'dev'): void {
+  for (const item of settingsNavItems) {
+    item.classList.toggle('active', item.dataset.section === name)
+  }
+  for (const panel of document.querySelectorAll<HTMLElement>('.settings-panel')) {
+    panel.hidden = panel.id !== `settings-panel-${name}`
+  }
+}
+
 function refresh(): void {
   renderGallery(galleryEl, catalog.games, { onContextMenu: showContextMenu })
   renderSettings(settingsEl, catalog.settings, {
     onAddFolder: handleAddFolder,
     onRemoveFolder: handleRemoveFolder,
-    onToggleConfirmBeforeLaunch: handleToggleConfirmBeforeLaunch,
     onRefreshArtwork: handleRefreshArtwork,
   })
+  confirmBeforeLaunchCheckbox.checked = catalog.settings.confirmBeforeLaunch
   renderBindingsList(
     bindingsListEl,
     catalog.bindings,
@@ -476,6 +495,7 @@ appMenuToggle.addEventListener('click', () => {
 })
 menuSettingsBtn.addEventListener('click', () => {
   hideAppMenu()
+  showSettingsSection('general')
   settingsDialog.showModal()
 })
 menuLogsCheckbox.addEventListener('change', () =>
@@ -490,11 +510,37 @@ closeBehaviorSelect.addEventListener('change', () =>
     closeBehaviorSelect.value as 'ask' | 'minimize' | 'quit',
   ),
 )
+confirmBeforeLaunchCheckbox.addEventListener('change', () =>
+  handleToggleConfirmBeforeLaunch(confirmBeforeLaunchCheckbox.checked),
+)
 
-// appWindow.minimize() corrupts the window on Windows when decorations are
-// disabled (native minimize animation needs window chrome that doesn't
-// exist here) -- hide() to the tray instead, reusing the same path the
-// close-to-tray flow already relies on.
+// The Dev section only makes sense against a running dev server -- a
+// production build's simulate-tag control would have nothing real to
+// compare against, so it's gated on Vite's own dev/prod distinction
+// rather than a setting anyone has to remember to turn off.
+if (import.meta.env.DEV) {
+  settingsNavDev.hidden = false
+} else {
+  settingsNavDev.remove()
+  settingsPanelDev.remove()
+  settingsNavItems = document.querySelectorAll<HTMLButtonElement>(
+    '.settings-nav-item',
+  )
+}
+
+for (const item of settingsNavItems) {
+  item.addEventListener('click', () => {
+    showSettingsSection(item.dataset.section as 'general' | 'game' | 'dev')
+  })
+}
+
+// Clicking the backdrop (i.e. the dialog element itself, outside its
+// content box) dismisses Settings -- unlike the close-prompt dialog,
+// there's no choice here that needs to resolve to something explicit.
+settingsDialog.addEventListener('click', (e) => {
+  if (e.target === settingsDialog) settingsDialog.close()
+})
+
 titlebarMinimizeBtn.addEventListener('click', () => {
   appWindow.minimize()
 })
@@ -540,10 +586,18 @@ listen('close-requested', () => closePromptDialog.showModal())
 closePromptDialog.addEventListener('cancel', (e) => e.preventDefault())
 
 async function resolveClosePrompt(minimize: boolean): Promise<void> {
-  await invokeOrAlert('resolve_close_prompt', {
+  // Quitting exits the process before a response comes back, but minimizing
+  // doesn't -- and a remembered choice made here needs to show up in the
+  // Settings panel without waiting for a restart, so apply the returned
+  // catalog the same way every other mutating command does.
+  const result = await invokeOrAlert<Catalog>('resolve_close_prompt', {
     minimize,
     remember: closePromptRemember.checked,
   })
+  if (result) {
+    catalog = result
+    refresh()
+  }
   closePromptDialog.close()
 }
 closePromptMinimizeBtn.addEventListener('click', () => resolveClosePrompt(true))

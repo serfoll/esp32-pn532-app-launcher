@@ -348,10 +348,18 @@ pub fn launch_game(exe_path: String, folder_path: String) -> Result<bool, String
 /// window close, whenever `close_behavior` hasn't been decided yet).
 /// Persists the choice for next time when `remember` is set, then either
 /// hides the window (tray-resident) or actually exits the app.
+///
+/// Returns the (possibly updated) catalog so the frontend's in-memory
+/// settings stay in sync -- otherwise a remembered choice made from this
+/// dialog wouldn't show up in the Settings panel until the app restarted.
 #[tauri::command]
-pub fn resolve_close_prompt(app: AppHandle, minimize: bool, remember: bool) -> Result<(), String> {
+pub fn resolve_close_prompt(
+    app: AppHandle,
+    minimize: bool,
+    remember: bool,
+) -> Result<Catalog, String> {
+    let mut catalog = load_catalog(&app)?;
     if remember {
-        let mut catalog = load_catalog(&app)?;
         catalog.settings.close_behavior = if minimize {
             CloseBehavior::Minimize
         } else {
@@ -367,5 +375,5 @@ pub fn resolve_close_prompt(app: AppHandle, minimize: bool, remember: bool) -> R
     } else {
         app.exit(0);
     }
-    Ok(())
+    Ok(catalog)
 }
