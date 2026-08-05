@@ -142,7 +142,7 @@ function updateReaderStatus(state: string): void {
 
 const TOAST_AUTO_DISMISS_MS = 5000
 
-function showAlert(message: string): void {
+function showToast(message: string): void {
   const toast = document.createElement('div')
   toast.className = 'toast'
 
@@ -190,7 +190,7 @@ async function invokeOrAlert<T>(
   try {
     return await invoke<T>(command, args)
   } catch (e) {
-    showAlert(`${command} failed: ${e}`)
+    showToast(`${command} failed: ${e}`)
     return undefined
   }
 }
@@ -288,7 +288,7 @@ async function handleRefreshArtwork(): Promise<void> {
   if (!result) return
   catalog = result
   refresh()
-  showAlert('Artwork refreshed.')
+  showToast('Artwork refreshed.')
 }
 
 async function handleRemoveFolder(path: string): Promise<void> {
@@ -362,7 +362,7 @@ async function handleSaveGameName(): Promise<void> {
   if (!result) return
   catalog = result
   refresh()
-  showAlert(`Renamed to "${name}".`)
+  showToast(`Renamed to "${name}".`)
   log(`Renamed game ${editGameId} -> "${name}"`)
 }
 
@@ -419,10 +419,11 @@ let runningGameIds = new Set<string>()
 const runningWaiters = new Map<string, () => void>()
 
 function renderGalleryView(): void {
-  renderGallery(galleryEl, catalog.games, catalog.bindings, runningGameIds, {
-    onContextMenu: showContextMenu,
-    onLaunch: handleLaunchFromGallery,
-  })
+  renderGallery(
+    galleryEl,
+    { games: catalog.games, bindings: catalog.bindings, runningGameIds },
+    { onContextMenu: showContextMenu, onLaunch: handleLaunchFromGallery },
+  )
 }
 
 async function pollRunningGames(): Promise<void> {
@@ -532,7 +533,7 @@ async function handleTagEvent(tagUid: string): Promise<void> {
 
   const game = catalog.games.find((g) => g.id === binding.gameId)
   if (!game) {
-    showAlert(
+    showToast(
       `Tag ${tagUid} is bound to a game that's no longer in the catalog.`,
     )
     log(`Tag ${tagUid} is bound to a game that's no longer in the catalog`)
@@ -573,7 +574,7 @@ bindConfirmBtn.addEventListener('click', async () => {
   catalog = result
   bindDialog.close()
   refresh()
-  showAlert(`Bound tag ${bindTagUid}.`)
+  showToast(`Bound tag ${bindTagUid}.`)
   log(
     `Bound tag ${bindTagUid} -> ${bindSelect.selectedOptions[0]?.textContent ?? gameId}`,
   )
@@ -688,7 +689,7 @@ listen<string>('reader-state', (event) => {
 listen<string>('tag-inserted', (event) => handleTagEvent(event.payload))
 listen<string>('tag-removed', (event) => log(`Tag removed: ${event.payload}`))
 listen<string>('reader-error', (event) => {
-  showAlert(`Reader: ${event.payload}`)
+  showToast(`Reader: ${event.payload}`)
   log(`Reader error: ${event.payload}`)
 })
 listen('close-requested', () => closePromptDialog.showModal())

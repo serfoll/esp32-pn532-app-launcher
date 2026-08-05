@@ -1,6 +1,15 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Binding, Game } from "../types";
 
+// games/bindings/runningGameIds always travel together as "the gallery's
+// current state" -- bundled so renderGallery doesn't keep growing a
+// positional parameter list every time it needs one more piece of it.
+export interface GalleryState {
+  games: Game[];
+  bindings: Binding[];
+  runningGameIds: ReadonlySet<string>;
+}
+
 export interface GalleryHandlers {
   onContextMenu: (event: MouseEvent, gameId: string) => void;
   onLaunch: (gameId: string) => void;
@@ -8,11 +17,10 @@ export interface GalleryHandlers {
 
 export function renderGallery(
   container: HTMLElement,
-  games: Game[],
-  bindings: Binding[],
-  runningGameIds: ReadonlySet<string>,
+  state: GalleryState,
   handlers: GalleryHandlers,
 ): void {
+  const { games, bindings, runningGameIds } = state;
   container.innerHTML = "";
 
   if (games.length === 0) {

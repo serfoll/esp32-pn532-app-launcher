@@ -218,9 +218,10 @@ struct SteamGridDbGridsResponse {
 /// Looks `name` up on SteamGridDB and downloads its top portrait grid (the
 /// tall library-capsule art, not the square icon) to `dest`. Requests
 /// `dimensions=600x900` specifically so results are the portrait style,
-/// not SteamGridDB's wide 460x215 grids — the gallery displays these at a
-/// 9:16 box via `object-fit: cover`, and cropping a wide grid down to that
-/// would cut off far more of the art than cropping a portrait one.
+/// not SteamGridDB's wide 460x215 grids — the gallery displays these in a
+/// 2:3 box sized to match 600x900 exactly, and a wide grid fit into that
+/// via `object-fit: contain` would render tiny and mostly empty space
+/// instead of filling the tile like a portrait grid does.
 /// Returns `None` on any failure along the way (offline, bad/missing key,
 /// no match, request error) so the caller can fall back to local artwork
 /// sources — this is an opportunistic enhancement, not a required step, and
