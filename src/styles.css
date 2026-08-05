@@ -233,25 +233,33 @@ button:active {
 
 .toast-container {
   position: fixed;
-  top: calc(var(--titlebar-height) + 0.75em);
-  right: 0.75em;
+  left: 0;
+  right: 0;
+  bottom: 0.75em;
   z-index: 40;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 0.5em;
-  max-width: 320px;
+  padding: 0 0.75em;
+  /* Only the toasts themselves should catch clicks -- the empty space
+     around them (most of the bar's height once there's just one toast)
+     must not block the gallery underneath. */
+  pointer-events: none;
 }
 
 .toast {
   display: flex;
   align-items: center;
   gap: 0.5em;
+  width: 100%;
   padding: 0.75em 1em;
   border-radius: 8px;
   background-color: #fff3cd;
   color: #664d03;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   animation: toast-in 0.15s ease;
+  pointer-events: auto;
 }
 
 .toast-message {
@@ -276,7 +284,7 @@ button:active {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -385,6 +393,14 @@ button:active {
 
 .game-art-button:hover .game-play-icon {
   opacity: 1;
+}
+
+/* Overlay tints red on hover for the running/stop state -- kept as a
+   modifier on the same element rather than a second span so play/stop
+   never both render at once. */
+.game-play-icon--stop {
+  font-size: 2em;
+  background-color: rgba(120, 0, 0, 0.45);
 }
 
 .game-running-badge {
@@ -520,6 +536,15 @@ dialog menu {
   gap: 0.5em;
   padding: 0;
   margin: 1em 0 0;
+}
+
+/* <progress> is an inline-replaced element with a small intrinsic default
+   width (like <img> without a size), so it doesn't stretch to fill the
+   dialog on its own -- the progress dialog's whole point is signaling
+   an in-progress wait, which reads as more substantial full-width. */
+progress {
+  display: block;
+  width: 100%;
 }
 
 /* Settings gets a fixed footprint instead of resizing per section --

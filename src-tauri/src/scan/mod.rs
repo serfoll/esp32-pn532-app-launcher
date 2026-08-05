@@ -93,12 +93,43 @@ fn score_candidate(folder_name: &str, exe: &Path) -> (u8, u64) {
     (name_score, size)
 }
 
+const DANGEROUS_ROOT_NAMES: &[&str] = &[
+    "windows",
+    "system32",
+    "syswow64",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "$recycle.bin",
+    "system volume information",
+];
+
+/// Refuses drive roots (`C:\`) and a denylist of OS-critical directory
+/// names -- cataloging one of these isn't an attack scenario, it's an
+/// ordinary typo/misclick in the "Add folder" text field or folder-browse
+/// dialog, but the app's Stop button force-kills every process under a
+/// cataloged game's folder. Scanning `C:\Windows` in would let one Stop
+/// click take down arbitrary running system processes.
+fn is_scannable_root(root: &Path) -> bool {
+    if root.parent().is_none() {
+        return false; // drive root: C:\, D:\, ...
+    }
+    match root.file_name().and_then(|n| n.to_str()) {
+        Some(name) => !DANGEROUS_ROOT_NAMES.contains(&name.to_lowercase().as_str()),
+        None => false,
+    }
+}
+
 /// Scans each immediate subfolder of `root` for a plausible main exe.
 /// Subfolders where nothing plausible is found are still returned with
 /// `exe_path: None` — flagged, not silently dropped, per the spec's
 /// Success Criteria ("any folder where no plausible exe is found is
-/// flagged, not silently dropped").
+/// flagged, not silently dropped"). Returns nothing at all for a root
+/// `is_scannable_root` rejects -- see its doc comment for why.
 pub fn scan_root(root: &Path) -> Vec<ScanCandidate> {
+    if !is_scannable_root(root) {
+        return Vec::new();
+    }
     let Ok(entries) = fs::read_dir(root) else {
         return Vec::new();
     };
@@ -327,6 +358,30 @@ mod tests {
     fn write_file(path: &Path, size: usize) {
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(path, vec![0u8; size]).unwrap();
+    }
+
+    #[test]
+    fn scan_root_refuses_a_drive_root() {
+        let candidates = scan_root(Path::new(r"C:\"));
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn scan_root_refuses_a_denylisted_os_directory_regardless_of_case() {
+        assert!(scan_root(Path::new(r"C:\Windows")).is_empty());
+        assert!(scan_root(Path::new(r"C:\WINDOWS")).is_empty());
+        assert!(scan_root(Path::new(r"C:\Program Files")).is_empty());
+    }
+
+    #[test]
+    fn scan_root_still_scans_an_ordinary_games_folder() {
+        let root = temp_root("ordinary_root");
+        write_file(&root.join("GameA").join("GameA.exe"), 10);
+
+        let candidates = scan_root(&root);
+        fs::remove_dir_all(&root).ok();
+
+        assert_eq!(candidates.len(), 1, "a real, non-denylisted folder name should still scan normally");
     }
 
     #[test]

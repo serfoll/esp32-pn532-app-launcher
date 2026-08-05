@@ -485,7 +485,7 @@ function renderGalleryView(): void {
       runningGameIds,
       showStoreBadges: catalog.settings.showStoreBadges,
     },
-    { onContextMenu: showContextMenu, onLaunch: handleLaunchFromGallery },
+    { onContextMenu: showContextMenu, onLaunch: handleLaunchFromGallery, onStop: handleStopGame },
   )
 }
 
@@ -566,6 +566,30 @@ async function launchGame(game: Game): Promise<void> {
 function handleLaunchFromGallery(gameId: string): void {
   const game = catalog.games.find((g) => g.id === gameId)
   if (game) launchGame(game)
+}
+
+async function handleStopGame(gameId: string): Promise<void> {
+  const game = catalog.games.find((g) => g.id === gameId)
+  if (!game) return
+
+  // Always confirmed, unlike launch (where confirmation is opt-in via
+  // confirmBeforeLaunch) -- stopping force-kills the process with no save
+  // prompt, so an accidental click here loses progress launching never
+  // risks.
+  if (!window.confirm(`Stop "${game.name}"? Any unsaved progress will be lost.`)) {
+    log(`Stop of "${game.name}" cancelled at confirm prompt`)
+    return
+  }
+
+  // Optimistic: reflects the stop immediately instead of waiting up to
+  // RUNNING_GAMES_POLL_INTERVAL_MS for the next poll tick to notice. If the
+  // stop actually failed, that same next tick corrects it back.
+  runningGameIds.delete(gameId)
+  renderGalleryView()
+
+  const stopped = await invokeOrAlert<boolean>('stop_game', { folderPath: game.folderPath })
+  if (stopped === undefined) return // invokeOrAlert already surfaced the error
+  log(stopped ? `Stopped "${game.name}"` : `"${game.name}" was already stopped`)
 }
 
 /** Looks up a tag UID against the catalog and reacts: alerts on an

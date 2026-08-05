@@ -23,6 +23,7 @@ export interface GalleryState {
 export interface GalleryHandlers {
   onContextMenu: (event: MouseEvent, gameId: string) => void;
   onLaunch: (gameId: string) => void;
+  onStop: (gameId: string) => void;
 }
 
 export function renderGallery(
@@ -57,6 +58,7 @@ export function renderGallery(
     });
 
     const isBound = boundGameIds.has(game.id);
+    const isRunning = runningGameIds.has(game.id);
     const iconButton = document.createElement("button");
     iconButton.type = "button";
     iconButton.className =
@@ -72,9 +74,13 @@ export function renderGallery(
     // though sighted-but-color-blind users still only get the border.
     iconButton.setAttribute(
       "aria-label",
-      `Launch ${game.name} (${isBound ? "tag bound" : "no tag bound"})`,
+      isRunning
+        ? `Stop ${game.name}`
+        : `Launch ${game.name} (${isBound ? "tag bound" : "no tag bound"})`,
     );
-    iconButton.addEventListener("click", () => handlers.onLaunch(game.id));
+    iconButton.addEventListener("click", () =>
+      isRunning ? handlers.onStop(game.id) : handlers.onLaunch(game.id),
+    );
 
     const img = document.createElement("img");
     img.className = "game-art";
@@ -90,9 +96,9 @@ export function renderGallery(
     iconButton.appendChild(img);
 
     const playIcon = document.createElement("span");
-    playIcon.className = "game-play-icon";
+    playIcon.className = "game-play-icon" + (isRunning ? " game-play-icon--stop" : "");
     playIcon.setAttribute("aria-hidden", "true");
-    playIcon.textContent = "▶";
+    playIcon.textContent = isRunning ? "⏹" : "▶";
     iconButton.appendChild(playIcon);
 
     if (showStoreBadges && game.store && STORE_ICONS[game.store]) {

@@ -329,6 +329,15 @@ pub fn launch_game(exe_path: String, folder_path: String) -> Result<bool, String
     Ok(true)
 }
 
+/// Kills a running game's process(es), the inverse of `launch_game` --
+/// the gallery's "Stop" action. `killed == 0` isn't an error: it just
+/// means the game had already stopped on its own (e.g. the next poll
+/// tick raced this call).
+#[tauri::command]
+pub fn stop_game(folder_path: String) -> bool {
+    crate::launch::stop_game(&folder_path) > 0
+}
+
 /// Returns the IDs of games with a process currently running from their
 /// install folder. Polled by the frontend to keep each game card's
 /// "running" badge in sync -- batched through `running_folders` so a
