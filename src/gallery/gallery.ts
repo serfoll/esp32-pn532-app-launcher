@@ -34,7 +34,15 @@ export function renderGallery(
   const { games, bindings, runningGameIds, showStoreBadges } = state;
   container.innerHTML = "";
 
-  if (games.length === 0) {
+  // Unavailable games (exe missing, or their folder no longer tracked by
+  // any root folder) don't get a card at all -- a dimmed "(unavailable)"
+  // card was still clickable and confusing about whether it could still
+  // launch. They stay in the catalog either way (bindings/artwork
+  // survive), so removing a folder here is purely a display filter, not a
+  // delete.
+  const availableGames = games.filter((g) => g.available);
+
+  if (availableGames.length === 0) {
     const empty = document.createElement("p");
     empty.className = "empty-state";
     empty.textContent = "No games yet. Add a folder in Settings to scan for games.";
@@ -45,13 +53,13 @@ export function renderGallery(
   const boundGameIds = new Set(bindings.map((b) => b.gameId));
   // Stable sort (guaranteed since ES2019): bound games float to the front,
   // otherwise games keep their original catalog order within each group.
-  const sortedGames = [...games].sort(
+  const sortedGames = [...availableGames].sort(
     (a, b) => Number(boundGameIds.has(b.id)) - Number(boundGameIds.has(a.id)),
   );
 
   for (const game of sortedGames) {
     const card = document.createElement("div");
-    card.className = "game-card" + (game.available ? "" : " unavailable");
+    card.className = "game-card";
     card.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       handlers.onContextMenu(e, game.id);
@@ -63,11 +71,6 @@ export function renderGallery(
     iconButton.type = "button";
     iconButton.className =
       "game-art-button " + (isBound ? "game-art-button--bound" : "game-art-button--unbound");
-    // Not disabled when unavailable -- launchGame already alerts with a
-    // reason in that case. A disabled button would swallow the click
-    // silently, leaving no way to find out why a game won't launch (unlike
-    // the tag-insert flow, which always explains).
-    //
     // The border color is the only visual signal for binding status, which
     // fails on color alone for low-vision/color-blind users -- stating it
     // in the accessible name keeps it available to screen readers even
@@ -130,7 +133,7 @@ export function renderGallery(
 
     const label = document.createElement("div");
     label.className = "game-name";
-    label.textContent = game.available ? game.name : `${game.name} (unavailable)`;
+    label.textContent = game.name;
     card.appendChild(label);
 
     container.appendChild(card);

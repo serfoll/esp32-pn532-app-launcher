@@ -357,7 +357,32 @@ async function handleRefreshArtwork(): Promise<void> {
   showToast('Artwork refreshed.')
 }
 
+function isUnderFolder(path: string, root: string): boolean {
+  const normalizedRoot = root.toLowerCase().replace(/\\+$/, '')
+  const normalizedPath = path.toLowerCase()
+  return normalizedPath === normalizedRoot || normalizedPath.startsWith(normalizedRoot + '\\')
+}
+
 async function handleRemoveFolder(path: string): Promise<void> {
+  const affectedGameIds = new Set(
+    catalog.games.filter((g) => isUnderFolder(g.folderPath, path)).map((g) => g.id),
+  )
+  const affectedBindings = catalog.bindings.filter((b) => affectedGameIds.has(b.gameId))
+
+  if (affectedBindings.length > 0) {
+    const lines = affectedBindings.map((b) => {
+      const game = catalog.games.find((g) => g.id === b.gameId)
+      return `${b.tagUid} -> ${game?.name ?? b.gameId}`
+    })
+    const proceed = window.confirm(
+      `"${path}" has ${affectedBindings.length} tag(s) bound to games in it:\n\n${lines.join('\n')}\n\nRemoving it will make those games unavailable. Continue?`,
+    )
+    if (!proceed) {
+      log(`Removal of "${path}" cancelled at confirm prompt`)
+      return
+    }
+  }
+
   const result = await invokeOrAlert<Catalog>('remove_root_folder', { path })
   if (!result) return
   catalog = result

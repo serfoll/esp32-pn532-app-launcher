@@ -346,10 +346,6 @@ button:active {
   gap: 0.5em;
 }
 
-.game-card.unavailable {
-  opacity: 0.5;
-}
-
 /* --game-status-color feeds the border color into the base rule plus its
    own :hover/:active overrides below, so status (bound/unbound) survives
    interaction instead of getting replaced by the generic button's blue
