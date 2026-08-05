@@ -57,9 +57,9 @@
 
     <dialog id="settings-dialog">
       <form method="dialog">
-        <div class="settings-dialog-header">
+        <div class="dialog-header">
           <h2>Settings</h2>
-          <button type="submit" class="settings-dialog-close" aria-label="Close settings">&#10005;</button>
+          <button type="submit" class="dialog-close" aria-label="Close settings">&#10005;</button>
         </div>
         <div class="settings-layout">
           <nav class="settings-nav">
@@ -129,13 +129,15 @@
 
     <dialog id="edit-game-dialog">
       <form method="dialog">
-        <h2>Edit game</h2>
+        <div class="dialog-header">
+          <h2>Edit game</h2>
+          <button type="submit" class="dialog-close" aria-label="Close">&#10005;</button>
+        </div>
         <label>
           Name
           <input id="edit-game-name" required />
         </label>
         <div class="edit-game-actions">
-          <button id="edit-game-save-name" type="button">Save name</button>
           <button id="edit-game-change-art" type="button">Change art...</button>
         </div>
 
@@ -143,7 +145,7 @@
         <div id="edit-game-tags-list"></div>
 
         <menu>
-          <button type="submit">Close</button>
+          <button id="edit-game-save-name" type="button">Save</button>
         </menu>
       </form>
     </dialog>

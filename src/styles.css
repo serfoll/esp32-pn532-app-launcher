@@ -627,19 +627,23 @@ progress {
   min-height: 0;
 }
 
-.settings-dialog-header {
+/* Generic top-right icon close button for any non-self-closing dialog --
+   settings started this pattern; every dialog that isn't a transient
+   confirm/progress popup should use it (see #settings-dialog's own
+   override below for the one layout wrinkle a fixed-size dialog needs). */
+.dialog-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-shrink: 0;
-  padding: 1.25em 1.5em 1em;
+  gap: 1em;
+  margin-bottom: 1em;
 }
 
-.settings-dialog-header h2 {
+.dialog-header h2 {
   margin: 0;
 }
 
-.settings-dialog-close {
+.dialog-close {
   background: none;
   box-shadow: none;
   border: none;
@@ -650,9 +654,18 @@ progress {
   color: inherit;
 }
 
-.settings-dialog-close:hover {
+.dialog-close:hover {
   background-color: rgba(0, 0, 0, 0.08);
   border-color: transparent;
+}
+
+/* #settings-dialog has padding: 0 (fixed-size layout, see below) instead
+   of the plain `dialog { padding: 1.5em }` every other dialog gets for
+   free -- its header has to supply that inset itself. */
+#settings-dialog .dialog-header {
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding: 1.25em 1.5em 1em;
 }
 
 .settings-layout {
@@ -811,7 +824,7 @@ progress {
     border-color: rgba(255, 255, 255, 0.1);
   }
 
-  .settings-dialog-close:hover {
+  .dialog-close:hover {
     background-color: rgba(255, 255, 255, 0.1);
   }
 

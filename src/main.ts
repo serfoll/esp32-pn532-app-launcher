@@ -586,14 +586,25 @@ async function pollRunningGames(): Promise<void> {
   if (!catalog) return // can race the initial catalog load, same as tag events
   const ids = await invokeOrAlert<string[]>('get_running_games')
   if (!ids) return
-  runningGameIds = new Set(ids)
+
+  const nextRunningGameIds = new Set(ids)
+  // renderGalleryView rebuilds every card from scratch (including a
+  // cache-busted <img src>, forcing every artwork file to reload from
+  // disk) -- calling it on every 3s poll regardless of whether anything
+  // actually changed was visible as the whole gallery flashing that often.
+  const changed =
+    nextRunningGameIds.size !== runningGameIds.size ||
+    [...nextRunningGameIds].some((id) => !runningGameIds.has(id))
+  runningGameIds = nextRunningGameIds
+
   for (const [gameId, resolve] of runningWaiters) {
     if (runningGameIds.has(gameId)) {
       runningWaiters.delete(gameId)
       resolve()
     }
   }
-  renderGalleryView()
+
+  if (changed) renderGalleryView()
 }
 
 /** Resolves once gameId shows up as running on a poll tick, or after
