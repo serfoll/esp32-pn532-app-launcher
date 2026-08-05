@@ -217,6 +217,7 @@ function refresh(): void {
     bindingsListEl,
     catalog.bindings,
     catalog.games,
+    handleRebindTag,
     handleUnbindTag,
   )
   outputLogEl.hidden = !catalog.settings.showOutputLog
@@ -373,8 +374,15 @@ async function handleChangeCloseBehavior(
 function openBindDialog(tagUid: string): void {
   bindTagUid = tagUid
   bindTagLabel.textContent = tagUid
-  renderBindDialog(bindSelect, catalog.games)
+  // Pre-selects the tag's current game when it already has a binding
+  // (rebinding), leaves the browser's default (first option) otherwise.
+  const currentGameId = catalog.bindings.find((b) => b.tagUid === tagUid)?.gameId
+  renderBindDialog(bindSelect, catalog.games, currentGameId)
   bindDialog.showModal()
+}
+
+function handleRebindTag(tagUid: string): void {
+  openBindDialog(tagUid)
 }
 
 function showContextMenu(event: MouseEvent, gameId: string): void {

@@ -6,23 +6,30 @@ export interface ConfirmedGameInput {
   exePath: string;
 }
 
-export function renderBindDialog(select: HTMLSelectElement, games: Game[]): void {
+export function renderBindDialog(
+  select: HTMLSelectElement,
+  games: Game[],
+  selectedGameId?: string,
+): void {
   select.innerHTML = "";
   for (const game of games) {
     const option = document.createElement("option");
     option.value = game.id;
     option.textContent = game.name;
+    if (game.id === selectedGameId) option.selected = true;
     select.appendChild(option);
   }
 }
 
-/** Lists every current tag<->game binding with an Unbind button, so a
+/** Lists every current tag<->game binding with Rebind/Unbind buttons, so a
  * binding made in error (or a cart the user wants to repurpose) can be
- * cleared without deleting the game itself. */
+ * pointed at a different game or cleared, without deleting the game
+ * itself. */
 export function renderBindingsList(
   container: HTMLElement,
   bindings: Binding[],
   games: Game[],
+  onRebind: (tagUid: string) => void,
   onUnbind: (tagUid: string) => void,
 ): void {
   container.innerHTML = "";
@@ -45,12 +52,22 @@ export function renderBindingsList(
     label.textContent = `${binding.tagUid} -> ${game?.name ?? "(game no longer in catalog)"}`;
     item.appendChild(label);
 
+    const actions = document.createElement("div");
+    actions.className = "bindings-list-actions";
+
+    const rebindButton = document.createElement("button");
+    rebindButton.type = "button";
+    rebindButton.textContent = "Rebind";
+    rebindButton.addEventListener("click", () => onRebind(binding.tagUid));
+    actions.appendChild(rebindButton);
+
     const unbindButton = document.createElement("button");
     unbindButton.type = "button";
     unbindButton.textContent = "Unbind";
     unbindButton.addEventListener("click", () => onUnbind(binding.tagUid));
-    item.appendChild(unbindButton);
+    actions.appendChild(unbindButton);
 
+    item.appendChild(actions);
     list.appendChild(item);
   }
   container.appendChild(list);

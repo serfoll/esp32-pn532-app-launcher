@@ -468,6 +468,12 @@ button:active {
   padding: 0.5em 0;
 }
 
+.bindings-list-actions {
+  display: flex;
+  gap: 0.5em;
+  flex-shrink: 0;
+}
+
 .root-folder-list li + li,
 .bindings-list li + li {
   border-top: 1px solid rgba(0, 0, 0, 0.08);
