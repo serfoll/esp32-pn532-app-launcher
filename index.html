@@ -54,35 +54,45 @@
 
     <dialog id="settings-dialog">
       <form method="dialog">
-        <h2>Settings</h2>
+        <div class="settings-dialog-header">
+          <h2>Settings</h2>
+          <button type="submit" class="settings-dialog-close" aria-label="Close settings">&#10005;</button>
+        </div>
         <div class="settings-layout">
           <nav class="settings-nav">
             <button type="button" class="settings-nav-item" data-section="general">General</button>
-            <button type="button" class="settings-nav-item" data-section="game">Game</button>
+            <button type="button" class="settings-nav-item" data-section="game">Games</button>
             <button type="button" class="settings-nav-item" data-section="dev" id="settings-nav-dev" hidden>Dev</button>
           </nav>
 
           <div class="settings-panels">
             <section id="settings-panel-general" class="settings-panel">
-              <h3>Closing behaviour</h3>
-              <select id="close-behavior-select">
-                <option value="ask">Ask each time</option>
-                <option value="minimize">Always minimize to tray</option>
-                <option value="quit">Always quit</option>
-              </select>
+              <div class="settings-field">
+                <label for="close-behavior-select">Closing behaviour</label>
+                <select id="close-behavior-select">
+                  <option value="ask">Ask each time</option>
+                  <option value="minimize">Always minimize to tray</option>
+                  <option value="quit">Always quit</option>
+                </select>
+              </div>
 
-              <label class="settings-checkbox-row">
-                <input type="checkbox" id="confirm-before-launch-checkbox" />
-                Confirm before launch
-              </label>
+              <div class="settings-field">
+                <label class="settings-checkbox-row">
+                  <input type="checkbox" id="confirm-before-launch-checkbox" />
+                  Confirm before launch
+                </label>
+                <p class="settings-field-hint">
+                  Show a confirmation prompt before launching a game, instead of launching immediately when its tag is scanned.
+                </p>
+              </div>
             </section>
 
             <section id="settings-panel-game" class="settings-panel" hidden>
-              <h3>Game folders</h3>
+              <h3>Games</h3>
               <div id="settings-content"></div>
             </section>
 
-            <section id="settings-panel-dev" class="settings-panel dev-tools" hidden>
+            <section id="settings-panel-dev" class="settings-panel" hidden>
               <h3>Simulate tag insert</h3>
               <div class="simulate-tag-row">
                 <input id="simulate-tag-input" placeholder="Tag UID, e.g. 04A3B2C1" />
@@ -91,10 +101,6 @@
             </section>
           </div>
         </div>
-
-        <menu>
-          <button type="submit">Close</button>
-        </menu>
       </form>
     </dialog>
 

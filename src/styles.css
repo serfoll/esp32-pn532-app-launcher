@@ -16,8 +16,29 @@
   -webkit-text-size-adjust: 100%;
 }
 
+/* App-shell layout: body pins to the window height and never scrolls
+   itself -- only the active <main> view scrolls internally. Without this,
+   .titlebar is just a normal in-flow element and scrolling a tall gallery
+   scrolls it away with everything else, dialog open or not; a plain
+   position: fixed on .titlebar alone would leave main's height wrong and
+   need a manual --titlebar-height offset (the workaround dialogs already
+   needed) instead of just not scrolling in the first place. */
+html,
+body {
+  height: 100%;
+}
+
 body {
   margin: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.titlebar,
+.app-header,
+.alert-banner {
+  flex-shrink: 0;
 }
 
 .titlebar {
@@ -171,6 +192,9 @@ nav {
 }
 
 main {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
   padding: 1.5em;
 }
 
@@ -251,7 +275,12 @@ button:active {
   align-items: center;
   justify-content: space-between;
   gap: 1em;
-  padding: 0.3em 0;
+  padding: 0.5em 0;
+}
+
+.root-folder-list li + li,
+.bindings-list li + li {
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
 }
 
 .bindings-list {
@@ -305,12 +334,6 @@ button:active {
   flex: 1;
 }
 
-.dev-tools {
-  margin-top: 2em;
-  padding-top: 1em;
-  border-top: 1px dashed rgba(0, 0, 0, 0.2);
-}
-
 /* Dialogs default to centering across the whole viewport, which lets them
    render on top of the custom titlebar -- offsetting both the dialog and
    its backdrop below --titlebar-height keeps the titlebar visible and its
@@ -340,10 +363,72 @@ dialog menu {
   margin: 1em 0 0;
 }
 
+/* Settings gets a fixed footprint instead of resizing per section --
+   switching between a two-line panel and a long folder list would
+   otherwise make the dialog itself jump size. #settings-dialog[open]
+   rather than a plain #settings-dialog selector: an ID beats the UA
+   stylesheet's dialog:not([open]) { display: none } on specificity
+   alone, so an unqualified display:flex here would force the dialog
+   visible even while closed (the same class of bug already fixed once
+   for .dropdown-menu[hidden]). */
+#settings-dialog {
+  width: 640px;
+  height: 480px;
+  padding: 0;
+}
+
+#settings-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+/* flex: 1 (not the default 0 1 auto) so the form actually claims the
+   dialog's full 480px instead of shrink-wrapping its content -- without
+   it, .settings-layout's flex: 1 below has no real space to grow into,
+   and any leftover height just sits as dead space past the content
+   instead of being absorbed by the scroll area. */
+#settings-dialog form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 0;
+}
+
+.settings-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: 1.25em 1.5em 1em;
+}
+
+.settings-dialog-header h2 {
+  margin: 0;
+}
+
+.settings-dialog-close {
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 6px;
+  padding: 0.4em 0.6em;
+  font-size: 0.9em;
+  line-height: 1;
+  color: inherit;
+}
+
+.settings-dialog-close:hover {
+  background-color: rgba(0, 0, 0, 0.08);
+  border-color: transparent;
+}
+
 .settings-layout {
   display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0 1.5em;
   gap: 1.5em;
-  min-width: 480px;
 }
 
 .settings-nav {
@@ -352,6 +437,8 @@ dialog menu {
   gap: 0.25em;
   flex-shrink: 0;
   min-width: 8em;
+  padding-right: 1.25em;
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
 }
 
 .settings-nav-item {
@@ -374,14 +461,75 @@ dialog menu {
   background-color: rgba(57, 108, 216, 0.15);
 }
 
+/* Scrolls the same as before, just without a visible track -- the classic
+   Windows scrollbar (~17px, no overlay) was rendering flush against the
+   Remove buttons with no breathing room. */
 .settings-panels {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  /* Bottom padding on the scrolling element itself, not its parent, so it
+     scrolls in as part of the content -- padding on .settings-layout
+     instead would just leave dead space below the box without giving the
+     last item any breathing room at the end of a real scroll. */
+  padding-bottom: 1.5em;
+}
+
+.settings-panels::-webkit-scrollbar {
+  display: none;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25em;
+}
+
+/* Same specificity trap as .dropdown-menu[hidden] before it: a bare class
+   selector setting display:flex ties with the UA stylesheet's
+   [hidden] { display: none } on specificity, and author-stylesheet source
+   order wins the tie -- so without this, every panel stayed visible
+   (stacked on top of each other) regardless of the hidden attribute,
+   which is what made the nav clicks look like they did nothing. */
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-panel h3 {
+  margin: 0;
+  font-size: 1em;
+}
+
+#settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1em;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4em;
+}
+
+.settings-field label {
+  font-weight: 500;
+}
+
+.settings-field-hint {
+  margin: 0;
+  font-size: 0.85em;
+  color: rgba(15, 15, 15, 0.6);
 }
 
 .settings-checkbox-row {
-  display: block;
-  margin-top: 1em;
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  font-weight: 500;
 }
 
 .edit-game-actions {
@@ -426,8 +574,21 @@ dialog menu {
     background-color: #0f0f0f69;
   }
 
-  .dev-tools {
-    border-top-color: rgba(255, 255, 255, 0.2);
+  .settings-nav {
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .settings-dialog-close:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .settings-field-hint {
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .root-folder-list li + li,
+  .bindings-list li + li {
+    border-top-color: rgba(255, 255, 255, 0.08);
   }
 
   dialog,
