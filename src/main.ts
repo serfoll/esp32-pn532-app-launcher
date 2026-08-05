@@ -130,6 +130,42 @@ const launchErrorMessageEl = document.querySelector<HTMLElement>(
   '#launch-error-message',
 )!
 
+const confirmDialog = document.querySelector<HTMLDialogElement>('#confirm-dialog')!
+const confirmDialogTitleEl = document.querySelector<HTMLElement>('#confirm-dialog-title')!
+const confirmDialogMessageEl = document.querySelector<HTMLElement>('#confirm-dialog-message')!
+const confirmDialogConfirmBtn = document.querySelector<HTMLButtonElement>(
+  '#confirm-dialog-confirm',
+)!
+confirmDialogConfirmBtn.addEventListener('click', () => confirmDialog.close('confirmed'))
+
+/** Styled replacement for window.confirm(), matching the rest of the
+ * app's dialog chrome. Resolves true only when the Confirm button was
+ * clicked (dialog.close('confirmed')) -- the Cancel button's plain
+ * form-submit and Escape both close with an empty returnValue, so both
+ * read as "cancelled" the same way. */
+function showConfirmDialog(options: {
+  title: string
+  message?: string
+  confirmLabel: string
+}): Promise<boolean> {
+  confirmDialogTitleEl.textContent = options.title
+  confirmDialogMessageEl.textContent = options.message ?? ''
+  confirmDialogMessageEl.hidden = !options.message
+  confirmDialogConfirmBtn.textContent = options.confirmLabel
+
+  confirmDialog.returnValue = ''
+  if (confirmDialog.open) confirmDialog.close()
+  confirmDialog.showModal()
+
+  return new Promise((resolve) => {
+    confirmDialog.addEventListener(
+      'close',
+      () => resolve(confirmDialog.returnValue === 'confirmed'),
+      { once: true },
+    )
+  })
+}
+
 const READER_STATUS_LABEL: Record<string, string> = {
   disconnected: 'Reader: disconnected',
   connectedUnknownFirmware: 'Reader: connected, needs firmware update',
@@ -381,9 +417,11 @@ async function handleRemoveFolder(path: string): Promise<void> {
       const game = catalog.games.find((g) => g.id === b.gameId)
       return `${b.tagUid} -> ${game?.name ?? b.gameId}`
     })
-    const proceed = window.confirm(
-      `"${path}" has ${affectedBindings.length} tag(s) bound to games in it:\n\n${lines.join('\n')}\n\nRemoving it will make those games unavailable. Continue?`,
-    )
+    const proceed = await showConfirmDialog({
+      title: `Remove "${path}"?`,
+      message: `${affectedBindings.length} tag(s) are bound to games in this folder:\n\n${lines.join('\n')}\n\nRemoving it will make those games unavailable.`,
+      confirmLabel: 'Remove',
+    })
     if (!proceed) {
       log(`Removal of "${path}" cancelled at confirm prompt`)
       return
@@ -591,7 +629,7 @@ async function launchGame(game: Game): Promise<void> {
 
   if (
     catalog.settings.confirmBeforeLaunch &&
-    !window.confirm(`Launch "${game.name}"?`)
+    !(await showConfirmDialog({ title: `Launch "${game.name}"?`, confirmLabel: 'Launch' }))
   ) {
     log(`Launch of "${game.name}" cancelled at confirm prompt`)
     return
@@ -631,7 +669,12 @@ async function handleStopGame(gameId: string): Promise<void> {
   // confirmBeforeLaunch) -- stopping force-kills the process with no save
   // prompt, so an accidental click here loses progress launching never
   // risks.
-  if (!window.confirm(`Stop "${game.name}"? Any unsaved progress will be lost.`)) {
+  const stopConfirmed = await showConfirmDialog({
+    title: `Stop "${game.name}"?`,
+    message: 'Any unsaved progress will be lost.',
+    confirmLabel: 'Stop',
+  })
+  if (!stopConfirmed) {
     log(`Stop of "${game.name}" cancelled at confirm prompt`)
     return
   }
