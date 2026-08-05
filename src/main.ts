@@ -2,6 +2,11 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { open } from '@tauri-apps/plugin-dialog'
+import {
+  enable as enableAutostart,
+  disable as disableAutostart,
+  isEnabled as isAutostartEnabled,
+} from '@tauri-apps/plugin-autostart'
 import type { Catalog, ConfirmResult, Game, ScanCandidate, SyncResult } from './types'
 import { renderGallery } from './gallery/gallery'
 import { renderGameTagsList } from './gallery/editGame'
@@ -21,6 +26,9 @@ const navGallery = document.querySelector<HTMLAnchorElement>('#nav-gallery')!
 const navBindings = document.querySelector<HTMLAnchorElement>('#nav-bindings')!
 const toastContainerEl = document.querySelector<HTMLElement>('#toast-container')!
 const readerStatusEl = document.querySelector<HTMLElement>('#reader-status')!
+const flashFirmwareButton = document.querySelector<HTMLButtonElement>(
+  '#flash-firmware-button',
+)!
 
 const appMenuToggle =
   document.querySelector<HTMLButtonElement>('#app-menu-toggle')!
@@ -60,6 +68,9 @@ const showStoreBadgesCheckbox = document.querySelector<HTMLInputElement>(
 )!
 const syncOnStartupCheckbox = document.querySelector<HTMLInputElement>(
   '#sync-on-startup-checkbox',
+)!
+const launchOnStartupCheckbox = document.querySelector<HTMLInputElement>(
+  '#launch-on-startup-checkbox',
 )!
 const simulateInput = document.querySelector<HTMLInputElement>(
   '#simulate-tag-input',
@@ -175,6 +186,27 @@ const READER_STATUS_LABEL: Record<string, string> = {
 function updateReaderStatus(state: string): void {
   readerStatusEl.textContent = READER_STATUS_LABEL[state] ?? `Reader: ${state}`
   readerStatusEl.className = `reader-status reader-status--${state}`
+  flashFirmwareButton.hidden = state !== 'connectedUnknownFirmware'
+}
+
+async function handleFlashFirmware(): Promise<void> {
+  const proceed = await showConfirmDialog({
+    title: 'Flash firmware?',
+    message: "This writes the app's bundled firmware to the connected board. Don't unplug it during the process.",
+    confirmLabel: 'Flash',
+  })
+  if (!proceed) {
+    log('Firmware flash cancelled at confirm prompt')
+    return
+  }
+
+  showProgressDialog('Flashing firmware... this can take a couple of minutes.')
+  const result = await invokeOrAlert<null>('flash_firmware')
+  progressDialog.close()
+  if (result === undefined) return // invokeOrAlert already surfaced the error
+
+  log('Firmware flashed successfully')
+  showToast('Firmware flashed.')
 }
 
 const TOAST_AUTO_DISMISS_MS = 5000
@@ -444,6 +476,24 @@ async function handleToggleShowStoreBadges(value: boolean): Promise<void> {
 
 async function handleToggleSyncOnStartup(value: boolean): Promise<void> {
   await updateSettings({ syncOnStartup: value })
+}
+
+// Not stored in catalog.json -- the OS registration (registry Run key)
+// is its own persistent source of truth, and duplicating it as a
+// settings field would risk drifting out of sync with it (e.g. if the
+// user removes the startup entry via Windows' own Settings app).
+async function handleToggleLaunchOnStartup(value: boolean): Promise<void> {
+  try {
+    if (value) {
+      await enableAutostart()
+    } else {
+      await disableAutostart()
+    }
+  } catch (e) {
+    log(`Failed to ${value ? 'enable' : 'disable'} launch on startup: ${e}`)
+    showToast(`Couldn't ${value ? 'enable' : 'disable'} launch on startup.`)
+    launchOnStartupCheckbox.checked = !value // reflects reality: the change didn't take
+  }
 }
 
 async function handleToggleShowOutputLog(value: boolean): Promise<void> {
@@ -748,6 +798,7 @@ function triggerSimulatedTagEvent(): void {
 }
 
 syncLibraryButton.addEventListener('click', () => handleSyncLibrary())
+flashFirmwareButton.addEventListener('click', () => handleFlashFirmware())
 
 bindConfirmBtn.addEventListener('click', async () => {
   const gameId = bindSelect.value
@@ -794,9 +845,10 @@ navBindings.addEventListener('click', (e) => {
 appMenuToggle.addEventListener('click', () => {
   appMenuEl.hidden = !appMenuEl.hidden
 })
-menuSettingsBtn.addEventListener('click', () => {
+menuSettingsBtn.addEventListener('click', async () => {
   hideAppMenu()
   showSettingsSection('general')
+  launchOnStartupCheckbox.checked = await isAutostartEnabled().catch(() => false)
   settingsDialog.showModal()
 })
 menuLogsCheckbox.addEventListener('change', () =>
@@ -819,6 +871,9 @@ showStoreBadgesCheckbox.addEventListener('change', () =>
 )
 syncOnStartupCheckbox.addEventListener('change', () =>
   handleToggleSyncOnStartup(syncOnStartupCheckbox.checked),
+)
+launchOnStartupCheckbox.addEventListener('change', () =>
+  handleToggleLaunchOnStartup(launchOnStartupCheckbox.checked),
 )
 
 // The Dev section only makes sense against a running dev server -- a

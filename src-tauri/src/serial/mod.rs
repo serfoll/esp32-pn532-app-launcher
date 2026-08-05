@@ -3,6 +3,8 @@
 // port for connect/disconnect + firmware-identity state.
 
 use std::io::{BufRead, BufReader, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -121,10 +123,22 @@ pub enum WatchdogEvent {
 /// insert/remove/error lines. Caller runs this on its own thread. Real USB
 /// plug/unplug timing can only be verified against actual hardware, not in
 /// a unit test.
-pub fn run_watchdog<F: FnMut(WatchdogEvent)>(mut on_event: F) -> ! {
+///
+/// `flashing` is checked before every port access: an in-progress flash
+/// needs exclusive, uninterrupted access to the port for its whole
+/// duration, and this watchdog would otherwise be fighting it for the
+/// same port every poll cycle (or, worse, sitting in `stream_tag_events`
+/// holding the port open indefinitely if flashing starts while a firmware
+/// that's already ConnectedReady is being re-flashed).
+pub fn run_watchdog<F: FnMut(WatchdogEvent)>(flashing: Arc<AtomicBool>, mut on_event: F) -> ! {
     let mut state = ReaderState::Disconnected;
     on_event(WatchdogEvent::State(state));
     loop {
+        if flashing.load(Ordering::Relaxed) {
+            thread::sleep(POLL_INTERVAL);
+            continue;
+        }
+
         let Some(port_name) = find_reader_port() else {
             if state != ReaderState::Disconnected {
                 state = ReaderState::Disconnected;
@@ -142,8 +156,9 @@ pub fn run_watchdog<F: FnMut(WatchdogEvent)>(mut on_event: F) -> ! {
 
         if state == ReaderState::ConnectedReady {
             // Blocks here streaming tag events until the connection drops
-            // (unplug, or an I/O error), then falls back to polling.
-            stream_tag_events(&port_name, &mut on_event);
+            // (unplug, an I/O error, or a flash starting), then falls back
+            // to polling.
+            stream_tag_events(&port_name, &mut on_event, &flashing);
             state = ReaderState::Disconnected;
             on_event(WatchdogEvent::State(state));
         }
@@ -157,8 +172,14 @@ pub fn run_watchdog<F: FnMut(WatchdogEvent)>(mut on_event: F) -> ! {
 
 /// Opens its own connection (separate from `probe_reader`'s) and reads
 /// lines until the port errors out, forwarding tag insert/remove/error
-/// events as they arrive.
-fn stream_tag_events<F: FnMut(WatchdogEvent)>(port_name: &str, on_event: &mut F) {
+/// events as they arrive. Also gives up the port if `flashing` flips true
+/// mid-stream, so a re-flash of an already-ConnectedReady board isn't
+/// blocked waiting for this loop to notice a disconnect that never comes.
+fn stream_tag_events<F: FnMut(WatchdogEvent)>(
+    port_name: &str,
+    on_event: &mut F,
+    flashing: &AtomicBool,
+) {
     let Ok(port) = serialport::new(port_name, 115_200)
         .timeout(Duration::from_millis(1000))
         .open()
@@ -169,6 +190,10 @@ fn stream_tag_events<F: FnMut(WatchdogEvent)>(port_name: &str, on_event: &mut F)
     let mut reader = BufReader::new(port);
     let mut line = String::new();
     loop {
+        if flashing.load(Ordering::Relaxed) {
+            return;
+        }
+
         line.clear();
         match reader.read_line(&mut line) {
             Ok(0) => return, // port closed

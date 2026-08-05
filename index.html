@@ -30,6 +30,9 @@
 
     <header class="app-header">
       <span id="reader-status" class="reader-status reader-status--disconnected">Reader: disconnected</span>
+      <button id="flash-firmware-button" type="button" class="flash-firmware-button" hidden>
+        Flash firmware...
+      </button>
       <nav>
         <a href="#" id="nav-gallery" class="nav-link">Gallery</a>
         <a href="#" id="nav-bindings" class="nav-link">Tag Bindings</a>
@@ -106,6 +109,16 @@
                 </label>
                 <p class="settings-field-hint">
                   Automatically rescan your library folders for new games each time the app opens.
+                </p>
+              </div>
+
+              <div class="settings-field">
+                <label class="settings-checkbox-row">
+                  <input type="checkbox" id="launch-on-startup-checkbox" />
+                  Launch on startup
+                </label>
+                <p class="settings-field-hint">
+                  Start Cart Reader automatically when you log in to Windows, so it's already watching the reader.
                 </p>
               </div>
             </section>

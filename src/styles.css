@@ -232,6 +232,19 @@ nav {
   color: #198754;
 }
 
+.flash-firmware-button {
+  padding: 0.3em 0.9em;
+  font-size: 0.85em;
+  align-self: center;
+  border-color: #a56d00;
+  color: #a56d00;
+}
+
+.flash-firmware-button:hover {
+  background-color: rgba(255, 193, 7, 0.15);
+  border-color: #a56d00;
+}
+
 main {
   flex: 1;
   min-height: 0;

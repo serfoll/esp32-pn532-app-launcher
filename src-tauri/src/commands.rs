@@ -315,6 +315,41 @@ pub fn get_reader_state(state: State<'_, Mutex<ReaderState>>) -> String {
     state.lock().unwrap().as_str().to_string()
 }
 
+/// Flashes the app's bundled firmware to the currently-connected reader.
+/// Sets the shared `flashing` flag around the (blocking, can take a
+/// couple of minutes) flash operation so the watchdog thread steps aside
+/// instead of fighting it for the port -- see `serial::run_watchdog`'s
+/// doc comment.
+#[tauri::command]
+pub fn flash_firmware(flashing: State<'_, std::sync::Arc<std::sync::atomic::AtomicBool>>) -> Result<(), String> {
+    let port = crate::serial::find_reader_port()
+        .ok_or_else(|| "No reader connected -- plug in the board first".to_string())?;
+
+    let _guard = FlashingGuard::new(&flashing);
+    crate::flash::flash_firmware(&port)
+}
+
+/// Sets `flashing` true for its lifetime and back to false on drop --
+/// unlike a plain store/call/store, this still resets the flag if
+/// `flash::flash_firmware` panics partway through, which a bare pair of
+/// statements wouldn't: the second store would simply never run, leaving
+/// the watchdog thread paused forever with no way to recover short of
+/// restarting the app.
+struct FlashingGuard<'a>(&'a std::sync::atomic::AtomicBool);
+
+impl<'a> FlashingGuard<'a> {
+    fn new(flag: &'a std::sync::atomic::AtomicBool) -> Self {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        Self(flag)
+    }
+}
+
+impl Drop for FlashingGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Launches a game, preferring its launcher's own protocol handler over a
 /// direct exe spawn when one is detected (currently just Steam) — many
 /// launcher-installed games are DRM-wrapped stubs that exit silently
